@@ -61,10 +61,28 @@ model SubmissionResult {
   errorType     String?
   errorMessage  String?
   output        String?
-  executionTime Int
+  executionTime Float?
+  memory        Float?
+  stderr        String?
+  compileOutput String?
   createdAt     DateTime   @default(now())
 
   submission    Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  explanation   DebuggingExplanation?
+}
+
+model DebuggingExplanation {
+  id                 Int              @id @default(autoincrement())
+  submissionResultId Int              @unique
+  summary            String
+  cause              String
+  location           String?
+  explanation        String
+  suggestion         String
+  correctedCode      String?
+  createdAt          DateTime         @default(now())
+
+  submissionResult   SubmissionResult @relation(fields: [submissionResultId], references: [id], onDelete: Cascade)
 }
 
 model TestCase {
