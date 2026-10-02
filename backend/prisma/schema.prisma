@@ -1,0 +1,88 @@
+// Prisma schema for Bugify
+// Documentation: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          Int           @id @default(autoincrement())
+  name        String
+  email       String        @unique
+  password    String
+  createdAt   DateTime      @default(now())
+
+  submissions Submission[]
+  progress    UserProgress?
+}
+
+model Problem {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String
+  difficulty  String
+  createdAt   DateTime     @default(now())
+
+  submissions Submission[]
+  testCases   TestCase[]
+}
+
+model Language {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  version     String
+
+  submissions Submission[]
+}
+
+model Submission {
+  id          Int               @id @default(autoincrement())
+  userId      Int
+  problemId   Int?
+  languageId  Int
+  code        String
+  createdAt   DateTime          @default(now())
+
+  user        User              @relation(fields: [userId], references: [id])
+  problem     Problem?          @relation(fields: [problemId], references: [id])
+  language    Language          @relation(fields: [languageId], references: [id])
+  result      SubmissionResult?
+}
+
+model SubmissionResult {
+  id            Int        @id @default(autoincrement())
+  submissionId  Int        @unique
+  status        String
+  errorType     String?
+  errorMessage  String?
+  output        String?
+  executionTime Int
+  createdAt     DateTime   @default(now())
+
+  submission    Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+}
+
+model TestCase {
+  id             Int      @id @default(autoincrement())
+  problemId      Int
+  input          String
+  expectedOutput String
+
+  problem        Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+}
+
+model UserProgress {
+  id                    Int      @id @default(autoincrement())
+  userId                Int      @unique
+  totalSubmissions      Int      @default(0)
+  successfulSubmissions Int      @default(0)
+  failedSubmissions     Int      @default(0)
+  updatedAt             DateTime @updatedAt
+
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
