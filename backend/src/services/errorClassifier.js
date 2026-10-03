@@ -222,7 +222,67 @@ function classifyResult(executionResult) {
   };
 }
 
+/**
+ * Classifies an IDE/language server diagnostic into a readable errorType.
+ */
+function classifyDiagnostic({ message = '', source = '', code = '', language = '' }) {
+  const msgLower = (message || '').toLowerCase();
+  const codeStr = String(code || '');
+  const langLower = (language || '').toLowerCase();
+
+  // 1. TypeScript / JS codes
+  if (codeStr === '2532' || msgLower.includes("possibly 'undefined'") || msgLower.includes('cannot read propert')) {
+    return 'TypeError';
+  }
+  if (codeStr === '2304' || msgLower.includes('cannot find name')) {
+    return langLower === 'python' ? 'NameError' : 'ReferenceError';
+  }
+  if (codeStr === '2322' || codeStr === '2345' || msgLower.includes('not assignable to type')) {
+    return 'TypeError';
+  }
+  if (codeStr.startsWith('10') || codeStr.startsWith('11') || msgLower.includes('declaration or statement expected') || msgLower.includes('unexpected token') || msgLower.includes('syntax')) {
+    return 'SyntaxError';
+  }
+
+  // 2. Python specific diagnostics
+  if (langLower === 'python' || source.toLowerCase().includes('pylance') || source.toLowerCase().includes('flake8') || source.toLowerCase().includes('pyright')) {
+    if (msgLower.includes('is not defined') || codeStr === 'reportUndefinedVariable') {
+      return 'NameError';
+    }
+    if (msgLower.includes('zero division') || msgLower.includes('division by zero')) {
+      return 'ZeroDivisionError';
+    }
+    if (msgLower.includes('index') && msgLower.includes('range')) {
+      return 'IndexError';
+    }
+    if (msgLower.includes("expected ':'") || msgLower.includes('invalid syntax')) {
+      return 'SyntaxError';
+    }
+    if (msgLower.includes('type') && (msgLower.includes('cannot') || msgLower.includes('incompatible'))) {
+      return 'TypeError';
+    }
+  }
+
+  // 3. General heuristics
+  if (msgLower.includes('undefined') || msgLower.includes('null')) {
+    return 'TypeError';
+  }
+  if (msgLower.includes('not defined')) {
+    return langLower === 'python' ? 'NameError' : 'ReferenceError';
+  }
+  if (msgLower.includes('type')) {
+    return 'TypeError';
+  }
+  if (msgLower.includes('syntax') || msgLower.includes('unexpected')) {
+    return 'SyntaxError';
+  }
+
+  return 'DiagnosticError';
+}
+
 module.exports = {
   classifyResult,
+  classifyDiagnostic,
   ErrorTypes,
 };
+

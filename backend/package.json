@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
@@ -14,7 +15,8 @@
     "@prisma/client": "^6.4.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "typescript": "^5.9.3"
   },
   "devDependencies": {
     "prisma": "^6.4.1"

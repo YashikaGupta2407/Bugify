@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bugify UI/UX Design System Harness</title>
+  <link rel="stylesheet" href="../media/bugify.css">
+  <style>
+    body.harness-root {
+      background: #000000;
+      color: #F5F5F5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .harness-nav {
+      background: #101010;
+      border: 1px solid #242424;
+      border-radius: 6px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .harness-title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #FF6A00;
+      text-transform: uppercase;
+    }
+
+    .harness-controls {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .harness-btn {
+      background: #151515;
+      border: 1px solid #333333;
+      color: #8A8A8A;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: all 0.15s ease;
+    }
+
+    .harness-btn:hover {
+      border-color: #FF6A00;
+      color: #FF6A00;
+    }
+
+    .harness-btn.active {
+      background: #FF6A00;
+      color: #080808;
+      border-color: #FF6A00;
+    }
+
+    .harness-frames {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+
+    .frame-container {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .frame-label {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      color: #8A8A8A;
+      text-transform: uppercase;
+    }
+
+    .frame-viewport {
+      border: 1px solid #242424;
+      border-radius: 6px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+      overflow-x: hidden;
+      overflow-y: auto;
+      max-height: 840px;
+    }
+  </style>
+</head>
+<body class="harness-root">
+  <header class="harness-nav">
+    <span class="harness-title">BUGIFY UI HARNESS</span>
+    <div class="harness-controls">
+      <button type="button" class="harness-btn active" data-show="all">ALL WIDTHS</button>
+      <button type="button" class="harness-btn" data-show="300">300PX</button>
+      <button type="button" class="harness-btn" data-show="360">360PX</button>
+      <button type="button" class="harness-btn" data-show="420">420PX</button>
+      <button type="button" class="harness-btn" data-show="500">500PX</button>
+    </div>
+    <div class="harness-controls">
+      <button type="button" class="harness-btn" id="toggleThemeBtn">TOGGLE HIGH-CONTRAST</button>
+      <button type="button" class="harness-btn" id="toggleMotionBtn">TOGGLE REDUCED-MOTION</button>
+      <button type="button" class="harness-btn" id="toggleIslandBtn">TOGGLE ISLAND EXPANSION</button>
+    </div>
+  </header>
+
+  <main class="harness-frames" id="framesContainer">
+    <!-- Frame 1: 300px - Minimal Width / Workspace Issues -->
+    <div class="frame-container" data-width="300">
+      <div class="frame-label">300px — Issues View + Island Collapsed</div>
+      <div class="frame-viewport bugify-instrument-surface" style="width: 300px;">
+        <!-- Header Bar -->
+        <header class="header-bar">
+          <div class="brand-group">
+            <svg class="brand-mark" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 4H9V6H5V18H9V20H3V4ZM21 4H15V6H19V18H15V20H21V4ZM10 10H14V14H10V10Z"/>
+            </svg>
+            <div class="brand-meta">
+              <span class="brand-wordmark">BUGIFY</span>
+              <span class="brand-subtitle">Workspace Intelligence</span>
+            </div>
+          </div>
+          <div class="header-status-group">
+            <div class="system-status" title="Bugify Instrument State">
+              <span class="status-dot clean" aria-hidden="true"></span>
+              <span>READY</span>
+            </div>
+            <span class="badge-count has-issues">2 ISSUES</span>
+          </div>
+          <div class="header-scan-track"><div class="header-scan-pulse"></div></div>
+        </header>
+
+        <!-- Island HUD Component (Collapsed) -->
+        <section class="island-instrument" id="island300" aria-expanded="false" style="margin: 12px;">
+          <button type="button" class="island-summary">
+            <div class="island-summary-left">
+              <span class="island-pulse-dot" aria-hidden="true"></span>
+              <span class="island-lead-tag">BUGIFY</span>
+              <span class="island-badge">2</span>
+              <span class="island-preview-text">TS2322 — Type 'string' is not assignable</span>
+            </div>
+            <span class="island-toggle-indicator" aria-hidden="true">▼</span>
+          </button>
+          <div class="island-expansion-wrap">
+            <div class="island-expanded-content">
+              <div class="island-inner-padding">
+                <div class="island-target-row">
+                  <span class="sev-indicator error"><span class="sev-glyph">■</span><span>ERROR</span></span>
+                  <span class="island-code">TS2322</span>
+                  <span class="island-location">ts-mismatch.ts:1</span>
+                </div>
+                <div class="island-detail-msg">Type 'string' is not assignable to type 'number'.</div>
+                <div class="island-actions">
+                  <button type="button" class="btn btn-secondary btn-xs">VIEW</button>
+                  <button type="button" class="btn btn-primary btn-xs">EXPLAIN</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Navigation Mode Bar -->
+        <nav class="mode-bar">
+          <div class="mode-tablist" role="tablist">
+            <button type="button" role="tab" aria-selected="true" class="mode-tab-btn active">
+              WORKSPACE <span class="tab-pill-count">2</span>
+            </button>
+            <button type="button" role="tab" aria-selected="false" class="mode-tab-btn">
+              ACTIVE FILE <span class="tab-pill-count">0</span>
+            </button>
+          </div>
+          <div class="mode-actions">
+            <button type="button" class="btn btn-secondary btn-xs">SCAN</button>
+          </div>
+        </nav>
+
+        <div style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <div class="filter-tablist" role="tablist">
+            <button type="button" role="tab" class="filter-btn active" aria-selected="true">ALL <span class="filter-count">(2)</span></button>
+            <button type="button" role="tab" class="filter-btn" aria-selected="false">ERRORS <span class="filter-count">(1)</span></button>
+            <button type="button" role="tab" class="filter-btn" aria-selected="false">WARNINGS <span class="filter-count">(1)</span></button>
+          </div>
+
+          <div class="issue-rows-list" role="list">
+            <!-- Row 1: Error with left hairline -->
+            <div class="issue-row row-error" data-severity="error" role="listitem">
+              <div class="issue-row-top">
+                <div class="issue-label-group">
+                  <span class="sev-indicator error"><span class="sev-glyph">■</span><span>ERROR</span></span>
+                  <span class="issue-code-badge">TS2322</span>
+                  <span class="issue-analyzer-tag">[ tsc ]</span>
+                </div>
+              </div>
+              <div class="issue-file-location">
+                <button type="button" class="loc-btn"><span class="loc-dir">test-fixtures/</span><span class="loc-file">ts-mismatch.ts</span><span class="loc-pos">:1:5</span></button>
+              </div>
+              <div class="issue-row-msg">Type 'string' is not assignable to type 'number'.</div>
+              <div class="issue-row-actions">
+                <button type="button" class="btn btn-secondary btn-xs">VIEW</button>
+                <button type="button" class="btn btn-primary btn-xs">EXPLAIN</button>
+              </div>
+            </div>
+
+            <!-- Row 2: Warning -->
+            <div class="issue-row row-warning" data-severity="warning" role="listitem">
+              <div class="issue-row-top">
+                <div class="issue-label-group">
+                  <span class="sev-indicator warning"><span class="sev-glyph">△</span><span>WARNING</span></span>
+                  <span class="issue-code-badge">TS2304</span>
+                  <span class="issue-analyzer-tag">[ tsc ]</span>
+                </div>
+              </div>
+              <div class="issue-file-location">
+                <button type="button" class="loc-btn"><span class="loc-dir">test-fixtures/</span><span class="loc-file">js-reference.js</span><span class="loc-pos">:1:13</span></button>
+              </div>
+              <div class="issue-row-msg">Cannot find name 'username'.</div>
+              <div class="issue-row-actions">
+                <button type="button" class="btn btn-secondary btn-xs">VIEW</button>
+                <button type="button" class="btn btn-primary btn-xs">EXPLAIN</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Frame 2: 360px - Scanning State + Analyzer Table -->
+    <div class="frame-container" data-width="360">
+      <div class="frame-label">360px — Active Scanning Progress</div>
+      <div class="frame-viewport bugify-instrument-surface" style="width: 360px;">
+        <header class="header-bar is-scanning">
+          <div class="brand-group">
+            <svg class="brand-mark" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 4H9V6H5V18H9V20H3V4ZM21 4H15V6H19V18H15V20H21V4ZM10 10H14V14H10V10Z"/>
+            </svg>
+            <div class="brand-meta">
+              <span class="brand-wordmark">BUGIFY</span>
+              <span class="brand-subtitle">Workspace Intelligence</span>
+            </div>
+          </div>
+          <div class="header-status-group">
+            <div class="system-status">
+              <span class="status-dot pulse" aria-hidden="true"></span>
+              <span>SCANNING</span>
+            </div>
+            <span class="badge-count has-issues">SCANNING</span>
+          </div>
+          <div class="header-scan-track"><div class="header-scan-pulse"></div></div>
+        </header>
+
+        <div style="padding: 16px;">
+          <div class="scan-card">
+            <div class="scan-card-header">
+              <span class="status-dot pulse" aria-hidden="true"></span>
+              <span class="scan-label">SCANNING WORKSPACE</span>
+              <button type="button" class="btn btn-secondary btn-xs" style="margin-left: auto;">CANCEL</button>
+            </div>
+            <div class="scan-line-container">
+              <div class="scan-travelling-line"></div>
+            </div>
+            <div class="scan-subtitle">Running workspace static analyzers across project files...</div>
+            <div class="analyzer-table">
+              <div class="analyzer-row status-completed">
+                <span class="analyzer-glyph">●</span>
+                <span class="analyzer-name">TypeScript</span>
+                <span class="analyzer-msg">Discovered 2 diagnostics in 890ms</span>
+              </div>
+              <div class="analyzer-row status-running">
+                <span class="analyzer-glyph">●</span>
+                <span class="analyzer-name">ESLint</span>
+                <span class="analyzer-msg">Analyzing Javascript/Typescript rules...</span>
+              </div>
+              <div class="analyzer-row status-pending">
+                <span class="analyzer-glyph">○</span>
+                <span class="analyzer-name">Pyright</span>
+                <span class="analyzer-msg">Queued for execution</span>
+              </div>
+              <div class="analyzer-row status-pending">
+                <span class="analyzer-glyph">○</span>
+                <span class="analyzer-name">Biome</span>
+                <span class="analyzer-msg">Configuration not found (skipped)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Frame 3: 420px - Analysis Report with Diff + Real Validation -->
+    <div class="frame-container" data-width="420">
+      <div class="frame-label">420px — Analysis Report &amp; Diff View</div>
+      <div class="frame-viewport bugify-instrument-surface" style="width: 420px;">
+        <header class="header-bar">
+          <div class="brand-group">
+            <svg class="brand-mark" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 4H9V6H5V18H9V20H3V4ZM21 4H15V6H19V18H15V20H21V4ZM10 10H14V14H10V10Z"/>
+            </svg>
+            <div class="brand-meta">
+              <span class="brand-wordmark">BUGIFY</span>
+              <span class="brand-subtitle">Workspace Intelligence</span>
+            </div>
+          </div>
+          <div class="header-status-group">
+            <div class="system-status">
+              <span class="status-dot clean" aria-hidden="true"></span>
+              <span>READY</span>
+            </div>
+            <span class="badge-count has-issues">1 ISSUE</span>
+          </div>
+          <div class="header-scan-track"><div class="header-scan-pulse"></div></div>
+        </header>
+
+        <div style="padding: 16px;">
+          <article class="report-panel">
+            <div class="report-breadcrumb">
+              <span class="breadcrumb-path">BUGIFY / ANALYSIS</span>
+              <span class="source-tag">SOURCE RULES</span>
+            </div>
+
+            <div class="analysis-target-header">
+              <div class="analysis-headline">
+                <span class="sev-indicator error">
+                  <span class="sev-glyph" aria-hidden="true">■</span>
+                  <span>TypeError</span>
+                </span>
+                <button type="button" class="loc-btn">
+                  <span class="loc-dir">test-fixtures/</span><span class="loc-file">ts-mismatch.ts</span><span class="loc-pos">:1</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="pipeline-tracker" aria-label="Analysis pipeline status">
+              <div class="pipeline-step step-done">
+                <span class="pipeline-step-glyph">●</span>
+                <span>DETECTED</span>
+              </div>
+              <div class="pipeline-step step-done">
+                <span class="pipeline-step-glyph">●</span>
+                <span>ROOT CAUSE</span>
+              </div>
+              <div class="pipeline-step step-done">
+                <span class="pipeline-step-glyph">●</span>
+                <span>FIX GENERATED</span>
+              </div>
+              <div class="pipeline-step step-done">
+                <span class="pipeline-step-glyph">●</span>
+                <span>FIX VALIDATED</span>
+              </div>
+            </div>
+
+            <div class="report-section">
+              <div class="section-label">ROOT CAUSE</div>
+              <div class="section-prose" style="font-family: var(--font-mono); font-size: 12px; color: var(--text);">Variable 'userId' has declared type 'number' but is assigned string literal "user_42" at line 1.</div>
+            </div>
+
+            <div class="report-section">
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span class="section-label">SUGGESTED FIX</span>
+                <button type="button" class="btn btn-secondary btn-xs" id="harnessCopyBtn">COPY FIX</button>
+              </div>
+              <div class="diff-container">
+                <div class="diff-pane diff-pane-del">
+                  <div class="diff-pane-header">
+                    <span>CURRENT</span>
+                    <span>-1</span>
+                  </div>
+                  <pre class="diff-pre"><code class="diff-line-del">- let userId: number = "user_42";</code></pre>
+                </div>
+                <div class="diff-pane diff-pane-add">
+                  <div class="diff-pane-header">
+                    <span>FIX</span>
+                    <span>+1</span>
+                  </div>
+                  <pre class="diff-pre"><code class="diff-line-add">+ let userId: string = "user_42";</code></pre>
+                </div>
+              </div>
+            </div>
+
+            <div class="report-section">
+              <div class="section-label">WHY</div>
+              <div class="section-prose">Matches the assigned value type so the TypeScript compiler can verify assignment safety.</div>
+            </div>
+
+            <div class="report-section">
+              <div class="section-label">VALIDATION</div>
+              <div class="validation-card">
+                <div class="validation-header">
+                  <span>●</span>
+                  <span>FIX VALIDATED (TYPESCRIPT AST SYNTAX &amp; TYPES SAFE)</span>
+                </div>
+                <div class="validation-msg">Fix is consistent with diagnostic TS2322 and passes syntax AST validation.</div>
+              </div>
+            </div>
+
+            <div class="report-footer">
+              <button type="button" class="btn btn-secondary btn-sm">VIEW CODE</button>
+              <button type="button" class="btn btn-secondary btn-sm">COPY FIX</button>
+              <button type="button" class="btn btn-primary btn-sm">APPLY FIX</button>
+              <button type="button" class="btn btn-secondary btn-sm">EXPLAIN MORE</button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+
+    <!-- Frame 4: 500px - Clean State, Island Expanded & Error State -->
+    <div class="frame-container" data-width="500">
+      <div class="frame-label">500px — Clean State, Island Expanded &amp; Connection Error</div>
+      <div class="frame-viewport bugify-instrument-surface" style="width: 500px;">
+        <header class="header-bar">
+          <div class="brand-group">
+            <svg class="brand-mark" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M3 4H9V6H5V18H9V20H3V4ZM21 4H15V6H19V18H15V20H21V4ZM10 10H14V14H10V10Z"/>
+            </svg>
+            <div class="brand-meta">
+              <span class="brand-wordmark">BUGIFY</span>
+              <span class="brand-subtitle">Workspace Intelligence</span>
+            </div>
+          </div>
+          <div class="header-status-group">
+            <div class="system-status">
+              <span class="status-dot clean" aria-hidden="true"></span>
+              <span>READY</span>
+            </div>
+            <span class="badge-count">0 ISSUES</span>
+          </div>
+          <div class="header-scan-track"><div class="header-scan-pulse"></div></div>
+        </header>
+
+        <!-- Island HUD Component (Expanded) -->
+        <section class="island-instrument" id="island500" aria-expanded="true" style="margin: 12px;">
+          <button type="button" class="island-summary">
+            <div class="island-summary-left">
+              <span class="island-pulse-dot" aria-hidden="true"></span>
+              <span class="island-lead-tag">BUGIFY</span>
+              <span class="island-badge">0</span>
+              <span class="island-preview-text">Workspace monitored</span>
+            </div>
+            <span class="island-toggle-indicator" aria-hidden="true">▼</span>
+          </button>
+          <div class="island-expansion-wrap">
+            <div class="island-expanded-content">
+              <div class="island-inner-padding">
+                <div class="island-target-row">
+                  <span class="sev-indicator info"><span class="sev-glyph">○</span><span>MONITOR</span></span>
+                  <span class="island-code">SYS-OK</span>
+                  <span class="island-location">All project files</span>
+                </div>
+                <div class="island-detail-msg">Active analyzer monitors are watching project sources for diagnostic updates.</div>
+                <div class="island-actions">
+                  <button type="button" class="btn btn-secondary btn-xs">STATUS</button>
+                  <button type="button" class="btn btn-primary btn-xs">SCAN WORKSPACE</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div style="padding: 12px; display: flex; flex-direction: column; gap: 14px;">
+          <!-- Clean State -->
+          <div class="state-box" role="region">
+            <div class="state-title">NO CURRENT DIAGNOSTICS</div>
+            <div class="state-desc">The workspace has no diagnostics reported by the available analyzers.</div>
+            <button type="button" class="btn btn-secondary btn-sm">SCAN WORKSPACE</button>
+          </div>
+
+          <!-- Connection Error State -->
+          <div class="state-box state-error" role="alert">
+            <div class="state-title">CONNECTION ERROR</div>
+            <div class="state-desc">Unable to reach Bugify analysis service at http://localhost:5000. Fallback rule analysis active.</div>
+            <button type="button" class="btn btn-secondary btn-sm">RETRY</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Harness Controls
+    const frames = document.querySelectorAll('.frame-container');
+    document.querySelectorAll('[data-show]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-show]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const show = btn.getAttribute('data-show');
+        frames.forEach(f => {
+          if (show === 'all' || f.getAttribute('data-width') === show) {
+            f.style.display = '';
+          } else {
+            f.style.display = 'none';
+          }
+        });
+      });
+    });
+
+    const toggleThemeBtn = document.getElementById('toggleThemeBtn');
+    toggleThemeBtn.addEventListener('click', () => {
+      document.body.classList.toggle('vscode-high-contrast');
+      toggleThemeBtn.classList.toggle('active');
+    });
+
+    const toggleMotionBtn = document.getElementById('toggleMotionBtn');
+    toggleMotionBtn.addEventListener('click', () => {
+      document.body.classList.toggle('reduced-motion');
+      toggleMotionBtn.classList.toggle('active');
+    });
+
+    const toggleIslandBtn = document.getElementById('toggleIslandBtn');
+    toggleIslandBtn.addEventListener('click', () => {
+      const island = document.getElementById('island300');
+      const expanded = island.getAttribute('aria-expanded') === 'true';
+      island.setAttribute('aria-expanded', String(!expanded));
+      toggleIslandBtn.classList.toggle('active');
+    });
+
+    // Copy feedback demonstration
+    const copyBtn = document.getElementById('harnessCopyBtn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = 'COPIED';
+        copyBtn.classList.add('btn-copied');
+        setTimeout(() => {
+          copyBtn.textContent = orig;
+          copyBtn.classList.remove('btn-copied');
+        }, 1500);
+      });
+    }
+  </script>
+</body>
+</html>

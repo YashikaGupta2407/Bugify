@@ -12,6 +12,8 @@ backend/.env
 # Build outputs
 dist/
 build/
+extension/out/
+*.vsix
 
 # Logs
 npm-debug.log*

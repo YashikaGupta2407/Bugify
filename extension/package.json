@@ -1,0 +1,103 @@
+{
+  "name": "bugify-vscode",
+  "displayName": "Bugify",
+  "description": "Developer debugging instrument for workspace static analysis and diagnostics",
+  "version": "0.1.0",
+  "publisher": "bugify",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YashikaGupta2407/Bugify.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "debugging",
+    "diagnostics",
+    "error",
+    "ai",
+    "python",
+    "javascript",
+    "typescript"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:python"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "bugify.openPanel",
+        "title": "Bugify: Open Panel",
+        "category": "Bugify"
+      },
+      {
+        "command": "bugify.scanWorkspace",
+        "title": "Bugify: Scan Workspace",
+        "category": "Bugify"
+      },
+      {
+        "command": "bugify.analyzeCurrentError",
+        "title": "Bugify: Analyze Current Error",
+        "category": "Bugify"
+      },
+      {
+        "command": "bugify.analyzeCurrentCode",
+        "title": "Bugify: Analyze Current Code",
+        "category": "Bugify"
+      },
+      {
+        "command": "bugify.open",
+        "title": "Bugify: Open Instrument",
+        "category": "Bugify"
+      },
+      {
+        "command": "bugify.refreshDiagnostics",
+        "title": "Bugify: Refresh Diagnostics",
+        "category": "Bugify"
+      }
+    ],
+    "configuration": {
+      "title": "Bugify",
+      "properties": {
+        "bugify.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:5000",
+          "description": "Base URL of the Bugify backend server"
+        },
+        "bugify.contextLines": {
+          "type": "number",
+          "default": 20,
+          "description": "Number of surrounding code lines to include in diagnostic context"
+        },
+        "bugify.requestTimeoutMs": {
+          "type": "number",
+          "default": 15000,
+          "description": "Timeout in milliseconds for Bugify backend API requests"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test test/pure.test.js test/workspaceScan.integration.test.js test/closedFileScan.acceptance.test.js",
+    "package": "npx @vscode/vsce package --no-dependencies --allow-missing-repository",
+    "host": "npm run compile && \"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/test-fixtures\"",
+    "host:antigravity": "npm run compile && \"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/test-fixtures\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

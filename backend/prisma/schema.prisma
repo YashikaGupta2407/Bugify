@@ -17,8 +17,9 @@ model User {
   password    String
   createdAt   DateTime      @default(now())
 
-  submissions Submission[]
-  progress    UserProgress?
+  submissions       Submission[]
+  progress          UserProgress?
+  extensionSessions ExtensionDebugSession[]
 }
 
 model Problem {
@@ -104,3 +105,24 @@ model UserProgress {
 
   user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+model ExtensionDebugSession {
+  id               Int      @id @default(autoincrement())
+  userId           Int
+  workspaceName    String?
+  filePath         String
+  language         String
+  errorType        String?
+  errorMessage     String?
+  diagnosticCode   String?
+  diagnosticSource String?
+  line             Int?
+  severity         String?
+  analysisSource   String   // "ai" | "rules"
+  aiExplanation    Json?
+  resolved         Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
