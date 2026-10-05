@@ -13,7 +13,24 @@ export interface BugifyDiagnostic {
   endColumn: number;
   filePath?: string;
   uri?: string;
+  category?: ErrorCategory;
 }
+
+export type ErrorCategory =
+  | 'SYNTAX'
+  | 'TYPE'
+  | 'REFERENCE'
+  | 'IMPORT'
+  | 'NULL / UNDEFINED'
+  | 'LOGIC'
+  | 'ASYNC'
+  | 'API'
+  | 'DATABASE'
+  | 'CONFIGURATION'
+  | 'LINT'
+  | 'RUNTIME'
+  | 'SECURITY'
+  | 'UNKNOWN';
 
 export interface CodeChange {
   line: number;
@@ -65,18 +82,23 @@ export interface AnalysisResult {
   analysisSource: 'ai' | 'rules';
   status: 'fixed' | 'needs_context' | 'cannot_fix';
   errorType: string;
+  category?: ErrorCategory;
   title: string;
   location: AnalysisLocation;
   summary: string;
   rootCause: string;
   whyItHappens: string;
+  why?: string;
+  recommendedAction?: string;
   originalCode: string;
   correctedCode: string | null;
   changes: CodeChange[];
   explanation: string;
   confidence: number;
+  confidenceLevel?: 'HIGH' | 'MEDIUM' | 'LOW';
+  verificationStatus?: 'VERIFIED' | 'NOT_VERIFIED';
   validation: FixValidationResult;
-  severity?: 'error' | 'warning' | 'info' | 'hint';
+  severity?: 'error' | 'warning' | 'info' | 'information' | 'hint';
   // Backward compatibility fields
   cause?: string;
   suggestion?: string;
@@ -102,14 +124,23 @@ export interface WebviewIncomingMessage {
     | 'retry'
     | 'switch-mode'
     | 'scan-workspace'
-    | 'open-issue';
+    | 'open-issue'
+    | 'explain-issue'
+    | 'view-issue'
+    | 'cancel-scan';
   mode?: 'workspace' | 'current_file';
   diagnosticIndex?: number;
+  index?: number;
   line?: number;
   column?: number;
+  endLine?: number;
+  endColumn?: number;
   file?: string;
   uri?: string;
   code?: string;
+  message?: string;
+  source?: string;
+  severity?: 'error' | 'warning' | 'information' | 'hint' | string;
   originalCode?: string;
   detail?: 'normal' | 'deep';
   diagnostic?: BugifyDiagnostic;

@@ -21,12 +21,24 @@ export interface TscAnalyzerResult {
 export async function runTscAnalyzer(
   workspaceRoot: string,
   tsconfigPaths: string[],
-  _unusedTscExecutable?: string,
-  token?: CancellationToken
+  sourceFilesOrTscExecutable?: string[] | string,
+  tokenOrTscExecutable?: CancellationToken | string,
+  maybeToken?: CancellationToken
 ): Promise<TscAnalyzerResult> {
   const startTime = Date.now();
 
-  if (tsconfigPaths.length === 0) {
+  let sourceFiles: string[] | undefined;
+  let token: CancellationToken | undefined;
+
+  if (Array.isArray(sourceFilesOrTscExecutable)) {
+    sourceFiles = sourceFilesOrTscExecutable;
+    token = maybeToken || (typeof tokenOrTscExecutable === 'object' ? (tokenOrTscExecutable as CancellationToken) : undefined);
+  } else {
+    token = typeof tokenOrTscExecutable === 'object' ? (tokenOrTscExecutable as CancellationToken) : maybeToken;
+  }
+
+  // Case A: Workspace has no tsconfig and no JS/TS source files
+  if (tsconfigPaths.length === 0 && (!sourceFiles || sourceFiles.length === 0)) {
     return {
       issues: [],
       status: {
@@ -34,16 +46,17 @@ export async function runTscAnalyzer(
         type: 'tsc',
         status: 'not_configured',
         issueCount: 0,
-        message: 'No tsconfig.json or jsconfig.json detected.',
+        message: 'No tsconfig.json, jsconfig.json, or source files detected.',
         durationMs: 0,
       },
     };
   }
 
   // Pre-check if any compiler is available
-  const sampleResolved = resolveTscExecutable(workspaceRoot, tsconfigPaths[0]);
+  const sampleConfig = tsconfigPaths.length > 0 ? tsconfigPaths[0] : undefined;
+  const sampleResolved = resolveTscExecutable(workspaceRoot, sampleConfig);
   if (!sampleResolved) {
-    logger.log('[Bugify] TypeScript project detected, but TypeScript compiler is unavailable.');
+    logger.log('[Bugify] TypeScript/JavaScript project detected, but TypeScript compiler is unavailable.');
     return {
       issues: [],
       status: {
@@ -57,27 +70,45 @@ export async function runTscAnalyzer(
     };
   }
 
-  logger.log(`[Bugify] Using ${sampleResolved.description} (${sampleResolved.command}) across ${tsconfigPaths.length} configuration(s)`);
-
   const allIssues: BugifyIssue[] = [];
   let anyTimedOut = false;
   let anyFailed = false;
 
-  for (const configPath of tsconfigPaths) {
-    if (token?.isCancellationRequested) {
-      break;
+  if (tsconfigPaths.length > 0) {
+    logger.log(`[Bugify] Using ${sampleResolved.description} (${sampleResolved.command}) across ${tsconfigPaths.length} configuration(s)`);
+
+    for (const configPath of tsconfigPaths) {
+      if (token?.isCancellationRequested) {
+        break;
+      }
+
+      try {
+        const issues = await executeSingleTsc(workspaceRoot, configPath, token);
+        allIssues.push(...issues);
+      } catch (err: any) {
+        if (err.timedOut) {
+          anyTimedOut = true;
+          logger.log(`[Bugify] TypeScript scan timed out on ${path.basename(configPath)}`);
+        } else {
+          anyFailed = true;
+          logger.log(`[Bugify] TypeScript runner error: ${err.message || err}`);
+        }
+      }
     }
+  } else if (sourceFiles && sourceFiles.length > 0) {
+    // Case B: Plain JS/TS workspace without tsconfig.json (e.g. project/src/{app.js, auth.js})
+    logger.log(`[Bugify] Scanning ${sourceFiles.length} source file(s) with ${sampleResolved.description}`);
 
     try {
-      const issues = await executeSingleTsc(workspaceRoot, configPath, token);
+      const issues = await executeTscOnFiles(workspaceRoot, sourceFiles, token);
       allIssues.push(...issues);
     } catch (err: any) {
       if (err.timedOut) {
         anyTimedOut = true;
-        logger.log(`[Bugify] TypeScript scan timed out on ${path.basename(configPath)}`);
+        logger.log('[Bugify] TypeScript scan timed out on project source files');
       } else {
         anyFailed = true;
-        logger.log(`[Bugify] TypeScript runner error: ${err.message || err}`);
+        logger.log(`[Bugify] TypeScript file scan error: ${err.message || err}`);
       }
     }
   }
@@ -180,6 +211,85 @@ function executeSingleTsc(
       if (timedOut) return;
 
       // Note: tsc exits with code 2 or 1 when type errors are found. This is expected.
+      const parsedIssues = parseTscOutput(stdout + '\n' + stderr, workspaceRoot);
+      resolve(parsedIssues);
+    });
+  });
+}
+
+function executeTscOnFiles(
+  workspaceRoot: string,
+  files: string[],
+  token?: CancellationToken
+): Promise<BugifyIssue[]> {
+  return new Promise((resolve, reject) => {
+    const resolved = resolveTscExecutable(workspaceRoot);
+    if (!resolved) {
+      return reject(new Error('TypeScript compiler is unavailable.'));
+    }
+
+    const command = resolved.command;
+    const args: string[] = [
+      ...resolved.argsPrefix,
+      '--allowJs',
+      '--checkJs',
+      '--noEmit',
+      '--pretty', 'false',
+      ...files.slice(0, 150),
+    ];
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    const child = spawn(command, args, {
+      cwd: workspaceRoot,
+      env: getAugmentedEnv(),
+      shell: false,
+    });
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        child.kill('SIGTERM');
+      } catch {
+        // ignore
+      }
+      reject({ timedOut: true });
+    }, TIMEOUT_MS);
+
+    if (token) {
+      const checkCancel = setInterval(() => {
+        if (token.isCancellationRequested) {
+          clearInterval(checkCancel);
+          clearTimeout(timer);
+          try {
+            child.kill('SIGTERM');
+          } catch {
+            // ignore
+          }
+          resolve([]);
+        }
+      }, 200);
+    }
+
+    child.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+
+    child.on('close', () => {
+      clearTimeout(timer);
+      if (timedOut) return;
+
       const parsedIssues = parseTscOutput(stdout + '\n' + stderr, workspaceRoot);
       resolve(parsedIssues);
     });

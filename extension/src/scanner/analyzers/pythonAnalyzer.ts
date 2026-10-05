@@ -1,7 +1,9 @@
 /**
- * Python Analyzer Runner (Pyright / Flake8 / Mypy).
+ * Python Analyzer Runner (Pyright / Python Syntax Checker).
  * Safely checks Python files with timeout and cancellation.
- * If no analyzer is installed, reports "No supported Python analyzer detected."
+ * If Pyright is installed, uses Pyright JSON diagnostics.
+ * If Pyright is unavailable, uses python3 syntax compiler fallback.
+ * Gracefully falls back to VS Code language server diagnostics without fabricating errors.
  */
 
 import { spawn } from 'child_process';
@@ -21,7 +23,7 @@ export interface PythonAnalyzerResult {
 export async function runPythonAnalyzer(
   workspaceRoot: string,
   hasPython: boolean,
-  _pyrightExecutable?: string,
+  pythonFilesOrPyright?: string[] | string,
   token?: CancellationToken
 ): Promise<PythonAnalyzerResult> {
   const startTime = Date.now();
@@ -40,24 +42,69 @@ export async function runPythonAnalyzer(
     };
   }
 
+  const pythonFiles = Array.isArray(pythonFilesOrPyright) ? pythonFilesOrPyright : undefined;
+
+  // 1. Check if Pyright executable is available
   const pyright = resolvePyrightExecutable(workspaceRoot);
-  if (!pyright) {
-    logger.log('[Bugify] Python project detected, but no supported Python analyzer (pyright) installed.');
-    return {
-      issues: [],
-      status: {
-        name: 'Python',
-        type: 'pyright',
-        status: 'not_configured',
-        issueCount: 0,
-        message: 'No supported Python analyzer detected.',
-        durationMs: Date.now() - startTime,
-      },
-    };
+  if (pyright) {
+    logger.log(`[Bugify] Running Pyright analyzer: ${pyright} --outputjson`);
+    return executePyright(workspaceRoot, pyright, startTime, token);
   }
 
-  logger.log(`[Bugify] Running Python analyzer: ${pyright} --outputjson`);
+  // 2. Fallback: Python syntax compiler if python3 is available
+  const pythonBin = findPythonExecutable();
+  if (pythonBin && pythonFiles && pythonFiles.length > 0) {
+    logger.log(`[Bugify] Pyright not found; running Python syntax check with ${pythonBin} on ${pythonFiles.length} file(s)`);
+    try {
+      const issues = await executePythonSyntaxCheck(workspaceRoot, pythonFiles, pythonBin, token);
+      const durationMs = Date.now() - startTime;
+      return {
+        issues,
+        status: {
+          name: 'Python',
+          type: 'pyright',
+          status: 'completed',
+          issueCount: issues.length,
+          message: `Syntax checker found ${issues.length} issue(s)`,
+          durationMs,
+        },
+      };
+    } catch (err: any) {
+      logger.log(`[Bugify] Python syntax check error: ${err.message || err}`);
+    }
+  }
 
+  logger.log('[Bugify] Pyright is unavailable. Gracefully consuming VS Code language server diagnostics.');
+  return {
+    issues: [],
+    status: {
+      name: 'Python',
+      type: 'pyright',
+      status: 'not_configured',
+      issueCount: 0,
+      message: 'Pyright CLI unavailable. Consuming VS Code diagnostics.',
+      durationMs: Date.now() - startTime,
+    },
+  };
+}
+
+function findPythonExecutable(): string | undefined {
+  const fs = require('fs');
+  const candidates = ['/usr/local/bin/python3', '/usr/bin/python3', 'python3', 'python'];
+  for (const c of candidates) {
+    if (path.isAbsolute(c) && fs.existsSync(c)) {
+      return c;
+    }
+  }
+  return 'python3';
+}
+
+function executePyright(
+  workspaceRoot: string,
+  pyright: string,
+  startTime: number,
+  token?: CancellationToken
+): Promise<PythonAnalyzerResult> {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -138,7 +185,7 @@ export async function runPythonAnalyzer(
       });
     });
 
-    child.on('close', (_code) => {
+    child.on('close', () => {
       clearTimeout(timer);
       if (timedOut) return;
 
@@ -157,6 +204,57 @@ export async function runPythonAnalyzer(
           durationMs,
         },
       });
+    });
+  });
+}
+
+function executePythonSyntaxCheck(
+  workspaceRoot: string,
+  files: string[],
+  pythonBin: string,
+  token?: CancellationToken
+): Promise<BugifyIssue[]> {
+  return new Promise((resolve) => {
+    const inlineScript = `
+import sys, py_compile, re
+files = sys.argv[1:]
+for f in files:
+    try:
+        py_compile.compile(f, doraise=True)
+    except py_compile.PyCompileError as err:
+        msg = err.msg
+        m = re.search(r'line (\\d+)', msg)
+        line = int(m.group(1)) if m else 1
+        lines = msg.strip().split('\\n')
+        last_line = lines[-1] if lines else 'SyntaxError'
+        print(f'{f}:{line}:1: error: {last_line}')
+    except Exception:
+        pass
+`;
+    const child = spawn(pythonBin, ['-c', inlineScript, ...files.slice(0, 100)], {
+      cwd: workspaceRoot,
+      env: getAugmentedEnv(),
+      shell: false,
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+
+    child.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
+
+    child.on('error', () => {
+      resolve([]);
+    });
+
+    child.on('close', () => {
+      const issues = parsePythonOutput(stdout || stderr, workspaceRoot);
+      resolve(issues);
     });
   });
 }

@@ -48,7 +48,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const editor = vscode.window.activeTextEditor;
 
     if (editor) {
-      const fileDiagnostics = diagnosticCollector.getActiveFileDiagnostics(editor.document.uri);
+      const fileDiagnostics = diagnosticCollector.getActiveFileDiagnostics(editor.document.uri, true);
       if (fileDiagnostics.length > 0) {
         const cursorLine = editor.selection.active.line + 1;
         const target =
@@ -74,13 +74,27 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  // Command 1: bugify.openPanel (Primary status bar action)
+  // Command 1: bugify.openWorkspace (Primary workspace overview action)
+  const openWorkspaceCommand = vscode.commands.registerCommand('bugify.openWorkspace', async () => {
+    logger.log('[Bugify] Open workspace command triggered');
+    const panel = BugifyPanel.createOrShow(
+      context.extensionUri,
+      apiClient,
+      diagnosticCollector,
+      workspaceScanner
+    );
+    panel.openWorkspaceView();
+  });
+
+  // Command 2: bugify.openPanel (Context-aware panel open)
   const openPanelCommand = vscode.commands.registerCommand('bugify.openPanel', handleOpenPanel);
 
-  // Command 2: bugify.open (Alias)
-  const openCommand = vscode.commands.registerCommand('bugify.open', handleOpenPanel);
+  // Command 3: bugify.open (Alias)
+  const openCommand = vscode.commands.registerCommand('bugify.open', async () => {
+    vscode.commands.executeCommand('bugify.openWorkspace');
+  });
 
-  // Command 3: bugify.scanWorkspace (Workspace Scan)
+  // Command 4: bugify.scanWorkspace (Workspace Scan)
   const scanWorkspaceCommand = vscode.commands.registerCommand('bugify.scanWorkspace', async () => {
     logger.log('[Bugify] Scan workspace command triggered');
     const panel = BugifyPanel.createOrShow(
@@ -109,7 +123,7 @@ export function activate(context: vscode.ExtensionContext): void {
         diagnosticCollector,
         workspaceScanner
       );
-      const fileDiagnostics = diagnosticCollector.getActiveFileDiagnostics(editor.document.uri);
+      const fileDiagnostics = diagnosticCollector.getActiveFileDiagnostics(editor.document.uri, true);
 
       let targetDiagnostic: BugifyDiagnostic | undefined;
 
@@ -174,6 +188,7 @@ export function activate(context: vscode.ExtensionContext): void {
   });
 
   context.subscriptions.push(
+    openWorkspaceCommand,
     openPanelCommand,
     openCommand,
     scanWorkspaceCommand,

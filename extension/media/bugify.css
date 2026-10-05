@@ -4,23 +4,23 @@
  */
 
 :root {
-  /* Surfaces */
-  --bg: #080808;
-  --surface: #101010;
-  --surface-2: #151515;
-  --surface-3: #1c1c1c;
-  --border: #242424;
-  --border-strong: #333333;
+  /* Surfaces - Black Palette */
+  --bg: #070707;
+  --surface: #0B0B0B;
+  --surface-2: #111111;
+  --surface-3: #171717;
+  --border: #222222;
+  --border-strong: #303030;
 
   /* Typography */
   --text: #F5F5F5;
   --text-2: #8A8A8A;
 
-  /* Brand Accent: Signal Layer (Target <= 5% pixels) */
+  /* Brand Accent: Signal Layer */
   --accent: #FF6A00;
-  --accent-hover: #FF8124;
-  --accent-dim: rgba(255, 106, 0, 0.14);
-  --accent-line: rgba(255, 106, 0, 0.40);
+  --accent-hover: #FF8533;
+  --accent-dim: rgba(255, 106, 0, 0.12);
+  --accent-line: rgba(255, 106, 0, 0.35);
 
   /* Severity system: Shape + Reinforcing Hue */
   --sev-error: #FF6A00;
@@ -1139,3 +1139,494 @@ html, body {
 .sk-w-100 { width: 100%; height: 12px; }
 .sk-w-85 { width: 85%; height: 12px; }
 .sk-box { width: 100%; height: 90px; margin-top: 4px; }
+
+/* -------------------------------------------------------------
+ * BUGIFY MVP DESIGN SYSTEM: MODE A, MODE B & SCANNING VIEWS
+ * ------------------------------------------------------------- */
+
+/* Brand Logo */
+.brand-logo-img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: var(--radius-xs);
+}
+
+/* Mode Navigation Bar */
+.mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Mode A: Workspace Issues View */
+.workspace-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.workspace-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.context-label {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.context-issue-count {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.divider-line {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0 6px;
+}
+
+.workspace-issue-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.workspace-issue-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-instrument);
+  position: relative;
+}
+
+.workspace-issue-item:last-child {
+  border-bottom: none;
+}
+
+.workspace-issue-item:hover {
+  background: var(--surface-2);
+}
+
+.workspace-issue-item.row-error {
+  border-left: 2px solid var(--sev-error);
+}
+
+.workspace-issue-item.row-warning {
+  border-left: 2px solid var(--sev-warning);
+}
+
+.issue-item-index {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+  min-width: 22px;
+  padding-top: 1px;
+}
+
+.issue-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.issue-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.issue-item-message {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.issue-item-location {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.issue-item-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  align-self: center;
+}
+
+/* Mode B: Current File View */
+.current-file-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.current-file-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.current-file-name {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.current-file-issue-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.file-issue-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+.file-issue-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--duration-fast) var(--ease-instrument);
+}
+
+.file-issue-tab:hover {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.file-issue-tab.active {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--accent);
+}
+
+.current-file-empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-6) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  margin: 12px;
+}
+
+/* Focused Debugging Intelligence Card */
+.debugging-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 14px;
+}
+
+.debugging-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.issue-headline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.debugging-card-msg {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.debugging-card-loc {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.card-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.intel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.intel-section-title {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.intel-section-prose {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.intel-fix-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.intel-fix-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.intel-section-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  background: var(--surface-2);
+  padding: 8px 12px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+}
+
+.grid-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.grid-cell-label {
+  font-family: var(--font-sans);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.grid-cell-value {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.confidence-high { color: var(--accent); }
+.confidence-medium { color: var(--sev-warning); }
+.confidence-low { color: var(--text-2); }
+
+.verification-verified { color: var(--diff-add-text); }
+.verification-unverified { color: var(--text-2); }
+
+.verification-glyph {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.debugging-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+/* Scanning Experience View */
+.scan-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 14px;
+  gap: 6px;
+  margin: 12px;
+}
+
+.scan-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scan-brand-title {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+
+.scan-action-title {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.scan-line-container {
+  height: 2px;
+  background: var(--surface-3);
+  position: relative;
+  overflow: hidden;
+  border-radius: 1px;
+  margin: 6px 0;
+}
+
+.scan-travelling-line {
+  position: absolute;
+  height: 100%;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: scanLineAnim 1.4s cubic-bezier(0.2, 0, 0, 1) infinite;
+}
+
+@keyframes scanLineAnim {
+  0% { left: -35%; }
+  100% { left: 100%; }
+}
+
+.scan-metrics-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  margin: 6px 0;
+}
+
+.scan-metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.metric-label {
+  color: var(--text-2);
+}
+
+.metric-value {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.metric-value.highlight-orange {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.state-brand {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+
+/* Responsive Panel Adaptation */
+@media (max-width: 340px) {
+  .header-bar {
+    padding: 6px 8px;
+  }
+  .brand-subtitle {
+    display: none;
+  }
+  .system-status span:last-child {
+    display: none;
+  }
+  .mode-tab-btn {
+    font-size: 10px;
+    padding: 6px 1px;
+  }
+  .workspace-issue-item {
+    padding: 8px;
+    gap: 6px;
+  }
+  .debugging-card {
+    padding: 10px;
+  }
+}
+

@@ -1,6 +1,4 @@
-/**
- * Bugify Workspace Scanner - Types & Contracts
- */
+import { ErrorCategory } from '../types/bugify';
 
 export interface BugifyIssue {
   id: string;
@@ -9,7 +7,8 @@ export interface BugifyIssue {
   column: number;
   endLine?: number;
   endColumn?: number;
-  severity: 'error' | 'warning' | 'info';
+  severity: 'error' | 'warning' | 'information' | 'hint' | 'info';
+  category?: ErrorCategory;
   message: string;
   source: string;
   code?: string;
@@ -42,11 +41,13 @@ export interface ProjectCapabilities {
   hasTypeScript: boolean;
   tsconfigPaths: string[];
   tscExecutable?: string;
+  sourceFiles?: string[];
   hasESLint: boolean;
   eslintConfigPath?: string;
   eslintExecutable?: string;
   hasPython: boolean;
   pythonFilesCount: number;
+  pythonSourceFiles?: string[];
   pyrightExecutable?: string;
 }
 

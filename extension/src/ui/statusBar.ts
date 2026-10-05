@@ -25,7 +25,7 @@ export class BugifyStatusBar {
       vscode.StatusBarAlignment.Right,
       100
     );
-    this.item.command = 'bugify.openPanel';
+    this.item.command = 'bugify.openWorkspace';
     context.subscriptions.push(this.item);
 
     // Update whenever VS Code live diagnostics change
@@ -67,8 +67,9 @@ export class BugifyStatusBar {
     }
 
     if (count > 0) {
-      this.item.text = `BUGIFY ${count}`;
-      this.item.tooltip = `Bugify: ${count} workspace issue${count === 1 ? '' : 's'} (${errorCount} error${errorCount === 1 ? '' : 's'}, ${warningCount} warning${warningCount === 1 ? '' : 's'}). Click to open Bugify.`;
+      const formatted = count < 10 ? `0${count}` : `${count}`;
+      this.item.text = `BUGIFY  ${formatted}`;
+      this.item.tooltip = `Bugify: ${count} actionable workspace issue${count === 1 ? '' : 's'} (${errorCount} error${errorCount === 1 ? '' : 's'}, ${warningCount} warning${warningCount === 1 ? '' : 's'}). Click to open Bugify.`;
       this.item.color = '#FF6A00';
       this.item.backgroundColor = undefined;
     } else {

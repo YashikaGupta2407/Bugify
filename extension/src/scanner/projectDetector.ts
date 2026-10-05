@@ -60,6 +60,47 @@ function findConfigFiles(dir: string, filenames: string[], maxDepth = 3, current
 }
 
 /**
+ * Recursively discovers source files matching given extensions up to maxDepth and limit.
+ */
+export function findSourceFiles(
+  dir: string,
+  extensions: string[],
+  maxDepth = 4,
+  maxFiles = 250,
+  currentDepth = 0
+): string[] {
+  if (currentDepth > maxDepth || !fs.existsSync(dir)) {
+    return [];
+  }
+
+  const results: string[] = [];
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (results.length >= maxFiles) break;
+
+      if (entry.isDirectory()) {
+        if (!IGNORED_DIRS.has(entry.name) && !entry.name.startsWith('.')) {
+          results.push(
+            ...findSourceFiles(path.join(dir, entry.name), extensions, maxDepth, maxFiles - results.length, currentDepth + 1)
+          );
+        }
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (extensions.includes(ext) && !entry.name.endsWith('.d.ts')) {
+          results.push(path.join(dir, entry.name));
+        }
+      }
+    }
+  } catch {
+    // Permission or I/O error
+  }
+
+  return results;
+}
+
+/**
  * Checks if a specific executable exists and is executable.
  */
 function isExecutable(filePath: string): boolean {
@@ -99,7 +140,16 @@ export async function detectProjectCapabilities(workspaceRoot: string): Promise<
     }
   }
 
-  const hasTypeScript = tsconfigPaths.length > 0;
+  // If no tsconfig/jsconfig found, discover .ts, .tsx, .js, .jsx source files in the project
+  let jsTsSourceFiles: string[] = [];
+  if (tsconfigPaths.length === 0) {
+    const discovered = findSourceFiles(root, ['.ts', '.tsx', '.js', '.jsx'], 4, 150);
+    if (discovered.length > 0) {
+      jsTsSourceFiles = discovered.map((p) => path.relative(root, p).replace(/\\/g, '/'));
+    }
+  }
+
+  const hasTypeScript = tsconfigPaths.length > 0 || jsTsSourceFiles.length > 0;
 
   // Resolve tsc executable
   let tscExecutable: string | undefined;
@@ -164,18 +214,13 @@ export async function detectProjectCapabilities(workspaceRoot: string): Promise<
     }
   }
 
-  // Also count Python files if no config found
-  let pythonFilesCount = 0;
-  if (!hasPython) {
-    try {
-      const files = fs.readdirSync(root);
-      pythonFilesCount = files.filter((f) => f.endsWith('.py')).length;
-      if (pythonFilesCount > 0) {
-        hasPython = true;
-      }
-    } catch {
-      // ignore
-    }
+  // Also count and discover Python files
+  let pythonSourceFiles: string[] = [];
+  const discoveredPy = findSourceFiles(root, ['.py'], 4, 150);
+  let pythonFilesCount = discoveredPy.length;
+  if (pythonFilesCount > 0) {
+    hasPython = true;
+    pythonSourceFiles = discoveredPy.map((p) => path.relative(root, p).replace(/\\/g, '/'));
   }
 
   let pyrightExecutable: string | undefined;
@@ -191,11 +236,13 @@ export async function detectProjectCapabilities(workspaceRoot: string): Promise<
     hasTypeScript,
     tsconfigPaths,
     tscExecutable,
+    sourceFiles: jsTsSourceFiles.length > 0 ? jsTsSourceFiles : undefined,
     hasESLint,
     eslintConfigPath,
     eslintExecutable,
     hasPython,
     pythonFilesCount,
+    pythonSourceFiles: pythonSourceFiles.length > 0 ? pythonSourceFiles : undefined,
     pyrightExecutable,
   };
 }

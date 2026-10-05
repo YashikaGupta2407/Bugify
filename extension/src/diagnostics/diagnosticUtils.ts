@@ -3,7 +3,209 @@
  * No VS Code dependencies - safe to test in standard Node.js test runner.
  */
 
-import { BugifyDiagnostic } from '../types/bugify';
+import { BugifyDiagnostic, ErrorCategory } from '../types/bugify';
+
+/**
+ * Normalizes common errors into useful categories adhering to Phase 12.
+ * Returns UNKNOWN if confidence is low.
+ */
+export function classifyErrorCategory(
+  diagnostic: {
+    message?: string;
+    code?: string | number;
+    source?: string;
+  },
+  language?: string
+): ErrorCategory {
+  const msg = (diagnostic.message || '').toLowerCase();
+  const code = String(diagnostic.code || '').toUpperCase();
+  const source = (diagnostic.source || '').toLowerCase();
+  const lang = (language || '').toLowerCase();
+
+  // 1. NULL / UNDEFINED
+  if (
+    code === '2532' ||
+    code === 'TS2532' ||
+    code === '2531' ||
+    code === 'TS2531' ||
+    code === '2533' ||
+    code === 'TS2533' ||
+    code === '18048' ||
+    code === 'TS18048' ||
+    code === '18047' ||
+    code === 'TS18047' ||
+    msg.includes("possibly 'undefined'") ||
+    msg.includes("possibly 'null'") ||
+    msg.includes("is possibly 'null' or 'undefined'") ||
+    msg.includes('cannot read property') ||
+    msg.includes('cannot read properties of undefined') ||
+    msg.includes('cannot read properties of null') ||
+    msg.includes("'nonetype' object has no attribute")
+  ) {
+    return 'NULL / UNDEFINED';
+  }
+
+  // 2. REFERENCE
+  if (
+    code === '2304' ||
+    code === 'TS2304' ||
+    code === '2552' ||
+    code === 'TS2552' ||
+    code === 'NO-UNDEF' ||
+    code === 'REPORTUNDEFINEDVARIABLE' ||
+    code === 'F821' ||
+    msg.includes('cannot find name') ||
+    msg.includes('is not defined') ||
+    msg.includes('nameerror') ||
+    msg.includes('referenceerror')
+  ) {
+    return 'REFERENCE';
+  }
+
+  // 3. TYPE
+  if (
+    code === '2322' ||
+    code === 'TS2322' ||
+    code === '2345' ||
+    code === 'TS2345' ||
+    code === '2365' ||
+    code === 'TS2365' ||
+    code === '2367' ||
+    code === 'TS2367' ||
+    code === '2741' ||
+    code === 'TS2741' ||
+    code === '2769' ||
+    code === 'TS2769' ||
+    code === '2352' ||
+    code === 'TS2352' ||
+    code === 'REPORTGENERALTYPEISSUES' ||
+    msg.includes('not assignable to type') ||
+    msg.includes('typeerror') ||
+    msg.includes('incompatible types')
+  ) {
+    return 'TYPE';
+  }
+
+  // 4. IMPORT
+  if (
+    code === '2307' ||
+    code === 'TS2307' ||
+    code === '2306' ||
+    code === 'TS2306' ||
+    code === '2792' ||
+    code === 'TS2792' ||
+    code === 'IMPORT/NO-UNRESOLVED' ||
+    msg.includes('cannot find module') ||
+    msg.includes('is not exported from') ||
+    msg.includes('modulenotfounderror') ||
+    msg.includes('importerror')
+  ) {
+    return 'IMPORT';
+  }
+
+  // 5. SYNTAX
+  if (
+    code.startsWith('10') ||
+    code.startsWith('TS10') ||
+    code.startsWith('11') ||
+    code.startsWith('TS11') ||
+    code === '1434' ||
+    code === 'TS1434' ||
+    code === 'SYNTAXERROR' ||
+    msg.includes('declaration or statement expected') ||
+    msg.includes('unexpected token') ||
+    msg.includes("';' expected") ||
+    msg.includes("expected ':'") ||
+    msg.includes('invalid syntax') ||
+    msg.includes('indentationerror') ||
+    msg.includes('syntax error') ||
+    msg.includes('syntaxerror')
+  ) {
+    return 'SYNTAX';
+  }
+
+  // 6. CONFIGURATION
+  if (
+    code === '80001' ||
+    code === 'TS80001' ||
+    code === '18003' ||
+    code === 'TS18003' ||
+    code === '5023' ||
+    code === 'TS5023' ||
+    msg.includes('file is a commonjs module') ||
+    msg.includes('tsconfig') ||
+    msg.includes('jsconfig')
+  ) {
+    return 'CONFIGURATION';
+  }
+
+  // 7. LINT
+  if (
+    source === 'eslint' ||
+    code === '6133' ||
+    code === 'TS6133' ||
+    msg.includes('declared but its value is never read') ||
+    msg.includes('declared but never used') ||
+    code.includes('NO-UNUSED') ||
+    code.includes('EQEQEQ')
+  ) {
+    return 'LINT';
+  }
+
+  // 8. ASYNC
+  if (
+    msg.includes('promise') ||
+    msg.includes('await') ||
+    msg.includes('async') ||
+    msg.includes('unhandledpromiserejection')
+  ) {
+    return 'ASYNC';
+  }
+
+  // 9. API
+  if (
+    msg.includes('econnrefused') ||
+    msg.includes('fetch') ||
+    msg.includes('axios') ||
+    msg.includes('status code 4') ||
+    msg.includes('status code 5')
+  ) {
+    return 'API';
+  }
+
+  // 10. DATABASE
+  if (
+    msg.includes('prisma') ||
+    msg.includes('sql') ||
+    msg.includes('postgres') ||
+    msg.includes('mongodb') ||
+    msg.includes('database') ||
+    msg.includes('relation does not exist')
+  ) {
+    return 'DATABASE';
+  }
+
+  // 11. SECURITY
+  if (
+    msg.includes('vulnerability') ||
+    msg.includes('cve-') ||
+    msg.includes('insecure') ||
+    msg.includes('eval')
+  ) {
+    return 'SECURITY';
+  }
+
+  // 12. RUNTIME
+  if (
+    msg.includes('runtimeerror') ||
+    msg.includes('zerodivisionerror') ||
+    msg.includes('recursionerror')
+  ) {
+    return 'RUNTIME';
+  }
+
+  return 'UNKNOWN';
+}
 
 /**
  * Normalizes a VS Code diagnostic code into a clean string.
@@ -54,6 +256,74 @@ export function mapDiagnosticSeverity(
   }
 
   return 'error';
+}
+
+/**
+ * Determines whether a diagnostic is actionable (Error or Warning).
+ * Information and Hint diagnostics are non-actionable suggestions and are excluded
+ * from default actionable issue lists.
+ */
+export function isActionableSeverity(
+  severity: number | string | undefined
+): boolean {
+  const norm = mapDiagnosticSeverity(severity);
+  return norm === 'error' || norm === 'warning';
+}
+
+export interface SeverityMetadata {
+  severity: 'error' | 'warning' | 'information' | 'hint';
+  label: 'ERROR' | 'WARNING' | 'INFORMATION' | 'HINT';
+  cssClass: 'error' | 'warning' | 'info';
+  rowClass: 'row-error' | 'row-warning' | 'row-info';
+  glyph: '■' | '△' | '○';
+  isActionable: boolean;
+}
+
+/**
+ * Returns UI metadata (label, CSS classes, glyph, actionable state) for a given severity.
+ */
+export function getSeverityMetadata(
+  rawSeverity: number | string | undefined
+): SeverityMetadata {
+  const norm = mapDiagnosticSeverity(rawSeverity);
+  switch (norm) {
+    case 'error':
+      return {
+        severity: 'error',
+        label: 'ERROR',
+        cssClass: 'error',
+        rowClass: 'row-error',
+        glyph: '■',
+        isActionable: true,
+      };
+    case 'warning':
+      return {
+        severity: 'warning',
+        label: 'WARNING',
+        cssClass: 'warning',
+        rowClass: 'row-warning',
+        glyph: '△',
+        isActionable: true,
+      };
+    case 'information':
+      return {
+        severity: 'information',
+        label: 'INFORMATION',
+        cssClass: 'info',
+        rowClass: 'row-info',
+        glyph: '○',
+        isActionable: false,
+      };
+    case 'hint':
+      return {
+        severity: 'hint',
+        label: 'HINT',
+        cssClass: 'info',
+        rowClass: 'row-info',
+        glyph: '○',
+        isActionable: false,
+      };
+  }
 }
 
 /**

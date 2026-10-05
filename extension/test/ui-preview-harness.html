@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bugify Webview UI Visual Verification</title>
+  <link rel="stylesheet" href="../media/bugify.css">
+  <style>
+    body {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 36px;
+      background: #050505;
+    }
+    .preview-section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .preview-header {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent);
+      border-bottom: 1px solid #222;
+      padding-bottom: 6px;
+    }
+    .viewport-harness {
+      border: 1px solid #333;
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--bg);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.8);
+    }
+    .viewport-360 { width: 360px; }
+    .viewport-420 { width: 420px; }
+    .viewport-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ========================================== -->
+  <!-- 1. MODE A: WORKSPACE ISSUES (MULTIPLE FILES) -->
+  <!-- ========================================== -->
+  <div class="preview-section">
+    <div class="preview-header">TEST SCENARIO 1: MODE A - WORKSPACE ISSUES OVERVIEW (360px & 420px)</div>
+    <div class="viewport-grid">
+      
+      <!-- 360px Panel -->
+      <div class="viewport-harness viewport-360">
+        <header class="header-bar">
+          <div class="brand-group">
+            <img src="../media/logo.png" alt="Bugify" class="brand-logo-img" width="22" height="22" />
+            <div class="brand-meta">
+              <span class="brand-wordmark">BUGIFY</span>
+              <span class="brand-subtitle">DEBUG INTELLIGENCE</span>
+            </div>
+          </div>
+          <div class="header-status-group">
+            <div class="system-status">
+              <span class="status-dot clean"></span>
+              <span>READY</span>
+            </div>
+            <span class="badge-count has-issues">03 ISSUES</span>
+          </div>
+        </header>
+
+        <nav class="mode-bar">
+          <div class="mode-tablist">
+            <button type="button" class="mode-tab-btn active">
+              WORKSPACE
+              <span class="tab-pill-count">03</span>
+            </button>
+            <button type="button" class="mode-tab-btn">
+              CURRENT FILE
+              <span class="tab-pill-count">01</span>
+            </button>
+          </div>
+          <div class="mode-actions">
+            <button type="button" class="btn btn-secondary btn-xs">SCAN WORKSPACE</button>
+          </div>
+        </nav>
+
+        <main class="workspace-view">
+          <div class="workspace-section-header">
+            <div class="context-label">WORKSPACE</div>
+            <div class="context-issue-count">03 ACTIONABLE ISSUES</div>
+            <div class="divider-line"></div>
+            <div class="filter-tablist">
+              <button type="button" class="filter-btn active">ALL (3)</button>
+              <button type="button" class="filter-btn">ERRORS (2)</button>
+              <button type="button" class="filter-btn">WARNINGS (1)</button>
+              <button type="button" class="btn btn-secondary btn-xs" style="margin-left: auto;">RESCAN</button>
+            </div>
+          </div>
+
+          <div class="workspace-issue-list">
+            <!-- Issue 01 -->
+            <div class="workspace-issue-item row-error">
+              <div class="issue-item-index">01</div>
+              <div class="issue-item-body">
+                <div class="issue-item-meta">
+                  <span class="sev-indicator error">
+                    <span class="sev-glyph">■</span>
+                    <span>ERROR</span>
+                  </span>
+                  <span class="issue-code-badge">TS2304</span>
+                </div>
+                <div class="issue-item-message">Cannot find name 'username'.</div>
+                <div class="issue-item-location">
+                  <span class="loc-path">extension/test-fixtures/js-reference.js</span>
+                  <span class="loc-coords">: L3:C13</span>
+                </div>
+              </div>
+              <div class="issue-item-actions">
+                <button type="button" class="btn btn-secondary btn-xs btn-open">OPEN</button>
+              </div>
+            </div>
+
+            <!-- Issue 02 -->
+            <div class="workspace-issue-item row-error">
+              <div class="issue-item-index">02</div>
+              <div class="issue-item-body">
+                <div class="issue-item-meta">
+                  <span class="sev-indicator error">
+                    <span class="sev-glyph">■</span>
+                    <span>ERROR</span>
+                  </span>
+                  <span class="issue-code-badge">TS2322</span>
+                </div>
+                <div class="issue-item-message">Type 'string' is not assignable to type 'number'.</div>
+                <div class="issue-item-location">
+                  <span class="loc-path">extension/test-fixtures/ts-mismatch.ts</span>
+                  <span class="loc-coords">: L3:C5</span>
+                </div>
+              </div>
+              <div class="issue-item-actions">
+                <button type="button" class="btn btn-secondary btn-xs btn-open">OPEN</button>
+              </div>
+            </div>
+
+            <!-- Issue 03 -->
+            <div class="workspace-issue-item row-warning">
+              <div class="issue-item-index">03</div>
+              <div class="issue-item-body">
+                <div class="issue-item-meta">
+                  <span class="sev-indicator warning">
+                    <span class="sev-glyph">△</span>
+                    <span>WARNING</span>
+                  </span>
+                  <span class="issue-code-badge">ESLINT</span>
+                </div>
+                <div class="issue-item-message">Promise rejection is not handled in async loop.</div>
+                <div class="issue-item-location">
+                  <span class="loc-path">backend/src/api.js</span>
+                  <span class="loc-coords">: L82:C7</span>
+                </div>
+              </div>
+              <div class="issue-item-actions">
+                <button type="button" class="btn btn-secondary btn-xs btn-open">OPEN</button>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- 2. MODE B: CURRENT FILE DEBUG INTELLIGENCE  -->
+      <!-- ========================================== -->
+      <div class="viewport-harness viewport-360">
+        <header class="header-bar">
+          <div class="brand-group">
+            <img src="../media/logo.png" alt="Bugify" class="brand-logo-img" width="22" height="22" />
+            <div class="brand-meta">
+              <span class="brand-wordmark">BUGIFY</span>
+              <span class="brand-subtitle">DEBUG INTELLIGENCE</span>
+            </div>
+          </div>
+          <div class="header-status-group">
+            <div class="system-status">
+              <span class="status-dot clean"></span>
+              <span>READY</span>
+            </div>
+            <span class="badge-count has-issues">01 ISSUE</span>
+          </div>
+        </header>
+
+        <nav class="mode-bar">
+          <div class="mode-tablist">
+            <button type="button" class="mode-tab-btn">
+              WORKSPACE
+              <span class="tab-pill-count">03</span>
+            </button>
+            <button type="button" class="mode-tab-btn active">
+              CURRENT FILE
+              <span class="tab-pill-count">01</span>
+            </button>
+          </div>
+          <div class="mode-actions">
+            <button type="button" class="btn btn-secondary btn-xs">SCAN WORKSPACE</button>
+          </div>
+        </nav>
+
+        <main class="current-file-view">
+          <div class="current-file-header">
+            <div class="context-label">CURRENT FILE</div>
+            <div class="current-file-name">js-reference.js</div>
+            <div class="current-file-issue-count">01 ISSUE</div>
+          </div>
+
+          <article class="debugging-card">
+            <div class="debugging-card-top">
+              <div class="issue-headline">
+                <span class="sev-indicator error">
+                  <span class="sev-glyph">■</span>
+                  <span>ERROR</span>
+                </span>
+                <span class="issue-code-badge">TS2304</span>
+              </div>
+              <button type="button" class="btn btn-secondary btn-xs">OPEN AT LINE</button>
+            </div>
+
+            <div class="debugging-card-msg">Cannot find name 'username'.</div>
+            <div class="debugging-card-loc">
+              <span class="loc-path">extension/test-fixtures/js-reference.js</span>
+              <span class="loc-coords"> : Line 3, Column 13</span>
+            </div>
+
+            <div class="card-divider"></div>
+
+            <section class="intel-section">
+              <div class="intel-section-title">WHAT HAPPENED</div>
+              <div class="intel-section-prose">The code references 'username', but no variable with that name is available in the current scope.</div>
+            </section>
+
+            <div class="card-divider"></div>
+
+            <section class="intel-section">
+              <div class="intel-section-title">ROOT CAUSE</div>
+              <div class="intel-section-prose">The variable is either not declared, misspelled, outside lexical scope, or missing an import binding.</div>
+            </section>
+
+            <div class="card-divider"></div>
+
+            <section class="intel-section">
+              <div class="intel-section-title">WHY IT HAPPENED</div>
+              <div class="intel-section-prose">The compiler cannot locate any local symbol, parameter, or module export matching 'username'.</div>
+            </section>
+
+            <div class="card-divider"></div>
+
+            <section class="intel-section">
+              <div class="intel-fix-header">
+                <div class="intel-section-title">RECOMMENDED ACTION</div>
+              </div>
+              <div class="intel-section-prose">Check whether 'username' is misspelled or requires being declared or imported before referencing it in this scope. Bugify withheld automated code generation to avoid guessing declarations.</div>
+            </section>
+
+            <div class="card-divider"></div>
+
+            <section class="intel-section-grid">
+              <div class="grid-cell">
+                <span class="grid-cell-label">CONFIDENCE</span>
+                <span class="grid-cell-value confidence-high">HIGH</span>
+              </div>
+              <div class="grid-cell">
+                <span class="grid-cell-label">VERIFICATION</span>
+                <span class="grid-cell-value verification-unverified">
+                  <span class="verification-glyph">○</span>
+                  <span>NOT VERIFIED</span>
+                </span>
+              </div>
+            </section>
+
+            <div class="debugging-card-footer">
+              <button type="button" class="btn btn-secondary btn-sm">OPEN AT LINE</button>
+              <button type="button" class="btn btn-secondary btn-sm">EXPLAIN MORE</button>
+            </div>
+          </article>
+        </main>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- 3. MODE B: CURRENT FILE CLEAN (0 ISSUES)   -->
+      <!-- ========================================== -->
+      <div class="viewport-harness viewport-360">
+        <header class="header-bar">
+          <div class="brand-group">
+            <img src="../media/logo.png" alt="Bugify" class="brand-logo-img" width="22" height="22" />
+            <div class="brand-meta">
+              <span class="brand-wordmark">BUGIFY</span>
+              <span class="brand-subtitle">DEBUG INTELLIGENCE</span>
+            </div>
+          </div>
+          <div class="header-status-group">
+            <div class="system-status">
+              <span class="status-dot clean"></span>
+              <span>READY</span>
+            </div>
+            <span class="badge-count">00 ISSUES</span>
+          </div>
+        </header>
+
+        <nav class="mode-bar">
+          <div class="mode-tablist">
+            <button type="button" class="mode-tab-btn">
+              WORKSPACE
+              <span class="tab-pill-count">03</span>
+            </button>
+            <button type="button" class="mode-tab-btn active">
+              CURRENT FILE
+              <span class="tab-pill-count">00</span>
+            </button>
+          </div>
+          <div class="mode-actions">
+            <button type="button" class="btn btn-secondary btn-xs">SCAN WORKSPACE</button>
+          </div>
+        </nav>
+
+        <main class="current-file-view">
+          <div class="current-file-empty-card">
+            <div class="context-label">CURRENT FILE</div>
+            <div class="current-file-name" style="margin-top: 4px;">validationService.js</div>
+            <div class="state-title" style="margin-top: 14px;">NO ACTIONABLE ISSUES</div>
+            <div class="state-desc" style="margin-top: 4px;">
+              Workspace contains 3 other actionable issues.
+            </div>
+            <button type="button" class="btn btn-primary btn-sm" style="margin-top: 14px;">
+              VIEW WORKSPACE (3)
+            </button>
+          </div>
+        </main>
+      </div>
+
+      <!-- ========================================== -->
+      <!-- 4. SCANNING WORKSPACE STATE                -->
+      <!-- ========================================== -->
+      <div class="viewport-harness viewport-360">
+        <header class="header-bar is-scanning">
+          <div class="brand-group">
+            <img src="../media/logo.png" alt="Bugify" class="brand-logo-img" width="22" height="22" />
+            <div class="brand-meta">
+              <span class="brand-wordmark">BUGIFY</span>
+              <span class="brand-subtitle">DEBUG INTELLIGENCE</span>
+            </div>
+          </div>
+          <div class="header-status-group">
+            <div class="system-status">
+              <span class="status-dot pulse"></span>
+              <span>SCANNING</span>
+            </div>
+            <span class="badge-count has-issues">03 ISSUES</span>
+          </div>
+          <div class="header-scan-track">
+            <div class="header-scan-pulse"></div>
+          </div>
+        </header>
+
+        <nav class="mode-bar">
+          <div class="mode-tablist">
+            <button type="button" class="mode-tab-btn active">
+              WORKSPACE
+              <span class="tab-pill-count">03</span>
+            </button>
+            <button type="button" class="mode-tab-btn">
+              CURRENT FILE
+              <span class="tab-pill-count">01</span>
+            </button>
+          </div>
+          <div class="mode-actions">
+            <button type="button" class="btn btn-secondary btn-xs">SCANNING...</button>
+          </div>
+        </nav>
+
+        <main>
+          <div class="scan-card">
+            <div class="scan-header">
+              <div class="scan-brand-title">BUGIFY</div>
+              <div class="scan-action-title">SCANNING WORKSPACE</div>
+            </div>
+            <div class="scan-line-container">
+              <div class="scan-travelling-line"></div>
+            </div>
+            <div class="scan-metrics-grid">
+              <div class="scan-metric-row">
+                <span class="metric-label">Files scanned</span>
+                <span class="metric-value">87</span>
+              </div>
+              <div class="scan-metric-row">
+                <span class="metric-label">Files with issues</span>
+                <span class="metric-value">4</span>
+              </div>
+              <div class="scan-metric-row">
+                <span class="metric-label">Issues found</span>
+                <span class="metric-value highlight-orange">6</span>
+              </div>
+            </div>
+            <div class="analyzer-table">
+              <div class="analyzer-row completed">
+                <span class="analyzer-cell-name"><span class="sev-glyph">●</span> TypeScript</span>
+                <span class="analyzer-cell-status">4 issues found</span>
+              </div>
+              <div class="analyzer-row running">
+                <span class="analyzer-cell-name"><span class="sev-glyph">●</span> ESLint</span>
+                <span class="analyzer-cell-status">Analyzing AST...</span>
+              </div>
+              <div class="analyzer-row pending">
+                <span class="analyzer-cell-name"><span class="sev-glyph">○</span> Python</span>
+                <span class="analyzer-cell-status">Waiting</span>
+              </div>
+            </div>
+            <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary btn-xs">CANCEL</button>
+            </div>
+          </div>
+        </main>
+      </div>
+
+    </div>
+  </div>
+
+</body>
+</html>

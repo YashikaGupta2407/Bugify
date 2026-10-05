@@ -11,6 +11,7 @@ import {
   normalizeDiagnosticCode,
   mapDiagnosticSeverity,
   convertTo1Based,
+  isActionableSeverity,
 } from './diagnosticUtils';
 import { logger } from '../logger';
 
@@ -37,7 +38,7 @@ export class DiagnosticCollector {
       this.debounceTimer = null;
       logger.log('[Bugify] Diagnostics changed');
       const summary = this.getGlobalSummary();
-      logger.log(`[Bugify] Found ${summary.totalCount} diagnostics (${summary.errorCount} errors, ${summary.warningCount} warnings) across workspace`);
+      logger.log(`[Bugify] Found ${summary.totalCount} actionable issues (${summary.errorCount} errors, ${summary.warningCount} warnings) across workspace`);
       this.onDiagnosticsChangedEmitter.fire();
     }, 300);
   }
@@ -92,8 +93,9 @@ export class DiagnosticCollector {
 
   /**
    * Retrieves normalized diagnostics for the active editor or a specific URI.
+   * By default returns all diagnostics; pass actionableOnly = true to filter to Error/Warning.
    */
-  public getActiveFileDiagnostics(uri?: vscode.Uri): BugifyDiagnostic[] {
+  public getActiveFileDiagnostics(uri?: vscode.Uri, actionableOnly: boolean = false): BugifyDiagnostic[] {
     const targetUri = uri || vscode.window.activeTextEditor?.document.uri;
     if (!targetUri) {
       return [];
@@ -101,14 +103,18 @@ export class DiagnosticCollector {
 
     const rawDiagnostics = vscode.languages.getDiagnostics(targetUri);
     const transformed = this.transformDiagnostics(rawDiagnostics, targetUri);
-    logger.log(`[Bugify] Found ${transformed.length} diagnostics in ${vscode.workspace.asRelativePath(targetUri, false)}`);
-    return transformed;
+    const result = actionableOnly
+      ? transformed.filter((d) => isActionableSeverity(d.severity))
+      : transformed;
+    logger.log(`[Bugify] Found ${result.length} diagnostics in ${vscode.workspace.asRelativePath(targetUri, false)}`);
+    return result;
   }
 
   /**
    * Retrieves all diagnostics across the entire workspace, including unopened files.
+   * Excludes non-actionable suggestions (Information and Hint) by default.
    */
-  public getWorkspaceDiagnostics(): BugifyDiagnostic[] {
+  public getWorkspaceDiagnostics(actionableOnly: boolean = true): BugifyDiagnostic[] {
     const allDiagnostics = vscode.languages.getDiagnostics();
     const results: BugifyDiagnostic[] = [];
 
@@ -117,7 +123,10 @@ export class DiagnosticCollector {
         continue;
       }
       const transformed = this.transformDiagnostics(fileDiags, uri);
-      results.push(...transformed);
+      const filtered = actionableOnly
+        ? transformed.filter((d) => isActionableSeverity(d.severity))
+        : transformed;
+      results.push(...filtered);
     }
 
     // Sort: errors first, then warnings, then file path and line number
@@ -132,8 +141,9 @@ export class DiagnosticCollector {
 
   /**
    * Groups workspace diagnostics by file for clear workspace scan UI presentation.
+   * Excludes non-actionable suggestions (Information and Hint) by default.
    */
-  public getWorkspaceIssuesByFile(): WorkspaceFileIssues[] {
+  public getWorkspaceIssuesByFile(actionableOnly: boolean = true): WorkspaceFileIssues[] {
     const allDiagnostics = vscode.languages.getDiagnostics();
     const groups: WorkspaceFileIssues[] = [];
 
@@ -143,13 +153,16 @@ export class DiagnosticCollector {
       }
 
       const transformed = this.transformDiagnostics(fileDiags, uri);
-      if (transformed.length === 0) continue;
+      const filtered = actionableOnly
+        ? transformed.filter((d) => isActionableSeverity(d.severity))
+        : transformed;
+      if (filtered.length === 0) continue;
 
       const relPath = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, '/');
       let errorCount = 0;
       let warningCount = 0;
 
-      for (const d of transformed) {
+      for (const d of filtered) {
         if (d.severity === 'error') {
           errorCount++;
         } else if (d.severity === 'warning') {
@@ -162,7 +175,7 @@ export class DiagnosticCollector {
         uri: uri.toString(),
         errorCount,
         warningCount,
-        diagnostics: transformed.sort((a, b) => a.startLine - b.startLine),
+        diagnostics: filtered.sort((a, b) => a.startLine - b.startLine),
       });
     }
 
@@ -179,19 +192,18 @@ export class DiagnosticCollector {
 
   /**
    * Retrieves global diagnostic summary counts across all workspace files.
+   * totalCount represents actionable issues (errors + warnings), excluding informational hints.
    */
   public getGlobalSummary(): { errorCount: number; warningCount: number; totalCount: number } {
     const allDiagnostics = vscode.languages.getDiagnostics();
     let errorCount = 0;
     let warningCount = 0;
-    let totalCount = 0;
 
     for (const [uri, fileDiags] of allDiagnostics) {
       if (!this.isWorkspaceRelevantFile(uri)) {
         continue;
       }
       for (const diag of fileDiags) {
-        totalCount++;
         if (diag.severity === vscode.DiagnosticSeverity.Error) {
           errorCount++;
         } else if (diag.severity === vscode.DiagnosticSeverity.Warning) {
@@ -200,7 +212,7 @@ export class DiagnosticCollector {
       }
     }
 
-    return { errorCount, warningCount, totalCount };
+    return { errorCount, warningCount, totalCount: errorCount + warningCount };
   }
 
   /**

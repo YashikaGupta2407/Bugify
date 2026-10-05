@@ -20,6 +20,12 @@ import { collectActiveContext, collectDocumentContext } from '../context/context
 import { buildLocalAnalysis } from '../diagnostics/localAnalysis';
 import { WorkspaceScanner } from '../scanner/workspaceScanner';
 import { BugifyIssue, AnalyzerStatus, WorkspaceScanResult } from '../scanner/types';
+import {
+  mapDiagnosticSeverity,
+  isActionableSeverity,
+  getSeverityMetadata,
+  normalizeDiagnosticCode,
+} from '../diagnostics/diagnosticUtils';
 import { logger } from '../logger';
 
 export interface PanelViewState {
@@ -180,18 +186,23 @@ export class BugifyPanel {
                 message.uri,
                 message.code,
                 message.message,
-                message.source
+                message.source,
+                message.severity
               );
             }
             break;
 
           case 'open-issue':
             if (message.file && message.line) {
-              await this.viewIssue(
+              await this.explainIssue(
                 message.file,
                 message.line,
                 message.column,
-                message.uri
+                message.uri,
+                message.code,
+                message.message,
+                message.source,
+                message.severity
               );
             }
             break;
@@ -438,7 +449,8 @@ export class BugifyPanel {
     uriString?: string,
     code?: string,
     messageText?: string,
-    source?: string
+    source?: string,
+    severity?: 'error' | 'warning' | 'information' | 'hint' | string
   ): Promise<void> {
     try {
       let targetUri: vscode.Uri | undefined;
@@ -465,8 +477,9 @@ export class BugifyPanel {
       editor.selection = new vscode.Selection(pos, pos);
       editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
 
+      const normSeverity = mapDiagnosticSeverity(severity);
       const targetDiag: BugifyDiagnostic = {
-        severity: 'error',
+        severity: normSeverity,
         message: messageText || 'Diagnostic error',
         source: source || 'compiler',
         code,
@@ -483,7 +496,9 @@ export class BugifyPanel {
       this.state.issues = [targetDiag];
       this.state.selectedIssueIndex = 0;
       this.state.empty = false;
-      this.state.analysis = buildLocalAnalysis(targetDiag, filePath);
+      const targetDocLine = doc.lineCount > targetLine ? doc.lineAt(targetLine).text : undefined;
+      const fullDocText = doc.getText();
+      this.state.analysis = buildLocalAnalysis(targetDiag, filePath, targetDocLine, fullDocText);
 
       // Collect bounded document context from the target file (even if closed!)
       const config = vscode.workspace.getConfiguration('bugify');
@@ -535,11 +550,11 @@ export class BugifyPanel {
     const rawDiagnostics = vscode.languages.getDiagnostics(editor.document.uri);
     const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false).replace(/\\/g, '/');
 
-    const fileDiagnostics: BugifyDiagnostic[] = rawDiagnostics.map((d) => ({
-      severity: d.severity === 0 ? 'error' : d.severity === 1 ? 'warning' : 'information',
+    const allFileDiagnostics: BugifyDiagnostic[] = rawDiagnostics.map((d) => ({
+      severity: mapDiagnosticSeverity(d.severity),
       message: d.message,
       source: d.source || 'compiler',
-      code: typeof d.code === 'object' ? String(d.code?.value) : d.code !== undefined ? String(d.code) : undefined,
+      code: normalizeDiagnosticCode(d.code),
       startLine: d.range.start.line + 1,
       startColumn: d.range.start.character + 1,
       endLine: d.range.end.line + 1,
@@ -548,12 +563,25 @@ export class BugifyPanel {
       uri: editor.document.uri.toString(),
     }));
 
+    // Actionable diagnostics: Errors and Warnings only.
+    // Information and Hint diagnostics are excluded from the default actionable issue list.
+    const actionableDiagnostics = allFileDiagnostics.filter((d) => isActionableSeverity(d.severity));
+
     this.state.activeFilePath = relativePath;
-    this.state.issues = fileDiagnostics;
     this.state.loading = false;
     this.state.aiError = undefined;
 
-    if (mode === 'analyze_error' && fileDiagnostics.length === 0) {
+    // Default target diagnostic: explicitly requested diagnostic or top actionable diagnostic
+    const target = specificDiagnostic || actionableDiagnostics[0];
+
+    // Populate issue list: only actionable issues by default; if non-actionable specifically requested, include it
+    if (specificDiagnostic && !isActionableSeverity(specificDiagnostic.severity)) {
+      this.state.issues = [specificDiagnostic, ...actionableDiagnostics];
+    } else {
+      this.state.issues = actionableDiagnostics;
+    }
+
+    if (mode === 'analyze_error' && !target) {
       if (this.state.workspaceTotalCount > 0) {
         this.state.viewMode = 'workspace';
         this.state.empty = false;
@@ -569,14 +597,16 @@ export class BugifyPanel {
 
     this.state.viewMode = 'current_file';
 
-    const target = specificDiagnostic || fileDiagnostics[0];
     if (target) {
-      const idx = fileDiagnostics.findIndex(
+      const idx = this.state.issues.findIndex(
         (d) => d.startLine === target.startLine && d.message === target.message
       );
       this.state.selectedIssueIndex = idx >= 0 ? idx : 0;
       this.state.empty = false;
-      this.state.analysis = buildLocalAnalysis(target, relativePath);
+      const targetLineIdx = Math.max(0, target.startLine - 1);
+      const docLineText = editor.document.lineCount > targetLineIdx ? editor.document.lineAt(targetLineIdx).text : undefined;
+      const fullDocText = editor.document.getText();
+      this.state.analysis = buildLocalAnalysis(target, relativePath, docLineText, fullDocText);
     } else {
       // Analyze code without diagnostic
       this.state.selectedIssueIndex = 0;
@@ -615,7 +645,7 @@ export class BugifyPanel {
       mode,
       detail: 'normal',
       targetDiagnostic: target,
-      allFileDiagnostics: fileDiagnostics,
+      allFileDiagnostics,
       contextLines,
     });
 
@@ -640,7 +670,10 @@ export class BugifyPanel {
    */
   private async selectDiagnostic(editor: vscode.TextEditor, diagnostic: BugifyDiagnostic): Promise<void> {
     const relativePath = vscode.workspace.asRelativePath(editor.document.uri, false).replace(/\\/g, '/');
-    this.state.analysis = buildLocalAnalysis(diagnostic, relativePath);
+    const targetLineIdx = Math.max(0, diagnostic.startLine - 1);
+    const docLineText = editor.document.lineCount > targetLineIdx ? editor.document.lineAt(targetLineIdx).text : undefined;
+    const fullDocText = editor.document.getText();
+    this.state.analysis = buildLocalAnalysis(diagnostic, relativePath, docLineText, fullDocText);
     this.state.aiError = undefined;
 
     const config = vscode.workspace.getConfiguration('bugify');
@@ -777,23 +810,37 @@ export class BugifyPanel {
       return;
     }
 
-    if (this.state.workspaceIssues && this.state.workspaceIssues.length > 0) {
-      this.state.viewMode = 'workspace';
-      this.state.empty = false;
-      this.render();
-      return;
-    }
-
     this.refreshWorkspaceData();
+    this.state.viewMode = 'workspace';
+    this.state.empty = this.state.workspaceTotalCount === 0;
+    this.render();
+  }
 
-    if (this.state.workspaceTotalCount > 0) {
-      this.state.viewMode = 'workspace';
+  public openWorkspaceView(): void {
+    this.state.viewMode = 'workspace';
+    this.refreshWorkspaceData();
+    const lastScan = this.workspaceScanner?.getLastResult();
+    if (lastScan && lastScan.issues.length > 0) {
+      this.state.workspaceScanResult = lastScan;
+      this.state.workspaceIssues = lastScan.issues;
+      this.state.workspaceTotalCount = lastScan.summary.totalIssues;
       this.state.empty = false;
     } else {
-      this.state.empty = true;
-      this.state.viewMode = 'workspace';
+      const summary = this.diagnosticCollector.getGlobalSummary();
+      this.state.workspaceTotalCount = summary.totalCount;
+      this.state.empty = summary.totalCount === 0;
     }
     this.render();
+  }
+
+  public async openCurrentFileView(editor?: vscode.TextEditor): Promise<void> {
+    const targetEditor = editor || vscode.window.activeTextEditor;
+    if (targetEditor) {
+      await this.analyzeEditor(targetEditor, 'analyze_error');
+    } else {
+      this.state.viewMode = 'current_file';
+      this.render();
+    }
   }
 
   public render(): void {
@@ -826,6 +873,9 @@ export class BugifyPanel {
     const stylesheetUri = this.panel.webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'bugify.css')
     );
+    const logoUri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'logo.png')
+    );
 
     const {
       viewMode,
@@ -851,104 +901,57 @@ export class BugifyPanel {
       ? this.state.activeFilePath.split(/[\/\\]/).pop() || 'Active File'
       : 'Active File';
 
-    // Collect issues to display in workspace mode
-    const issuesToDisplay =
-      workspaceIssues && workspaceIssues.length > 0
-        ? workspaceIssues
-        : workspaceScanResult && workspaceScanResult.issues && workspaceScanResult.issues.length > 0
-        ? workspaceScanResult.issues
-        : [];
+    // Collect actionable issues to display in workspace mode
+    let issuesToDisplay: Array<{
+      filePath: string;
+      line: number;
+      column: number;
+      endLine?: number;
+      endColumn?: number;
+      severity: 'error' | 'warning' | 'information' | 'hint' | string;
+      message: string;
+      source: string;
+      code?: string;
+      analyzer?: string;
+      uri?: string;
+    }> = [];
 
-    const totalIssuesCount = viewMode === 'workspace' ? issuesToDisplay.length : activeCount;
-    const errorCount =
-      viewMode === 'workspace'
-        ? issuesToDisplay.filter((i) => i.severity === 'error').length
-        : issues ? issues.filter((i) => i.severity === 'error').length : 0;
-    const warningCount =
-      viewMode === 'workspace'
-        ? issuesToDisplay.filter((i) => i.severity === 'warning').length
-        : issues ? issues.filter((i) => i.severity === 'warning').length : 0;
-
-    // Determine current focal issue for the Island HUD component
-    let islandCode = '';
-    let islandLocation = '';
-    let islandMessage = '';
-    let islandFile = '';
-    let islandLine = 1;
-    let islandCol = 1;
-    let islandUri = '';
-    let islandSource = '';
-
-    if (viewMode === 'workspace' && issuesToDisplay.length > 0) {
-      const topIssue = issuesToDisplay[0];
-      islandCode = topIssue.code || topIssue.source.toUpperCase();
-      islandLocation = `${topIssue.filePath}:${topIssue.line}`;
-      islandMessage = topIssue.message;
-      islandFile = topIssue.filePath;
-      islandLine = topIssue.line;
-      islandCol = topIssue.column;
-      islandUri = topIssue.uri || '';
-      islandSource = topIssue.source;
-    } else if (viewMode === 'current_file' && issues && issues.length > 0) {
-      const currentIssue = issues[selectedIssueIndex] || issues[0];
-      islandCode = currentIssue.code || (currentIssue.source ? currentIssue.source.toUpperCase() : 'DIAGNOSTIC');
-      islandLocation = `${activeFileName}:${currentIssue.startLine}`;
-      islandMessage = currentIssue.message;
-      islandFile = this.state.activeFilePath || activeFileName;
-      islandLine = currentIssue.startLine;
-      islandCol = currentIssue.startColumn;
-      islandUri = currentIssue.uri || '';
-      islandSource = currentIssue.source || '';
-    } else if (analysis) {
-      islandCode = analysis.errorType || 'DIAGNOSTIC';
-      const line = analysis.location?.startLine || analysis.location?.line || 1;
-      const file = analysis.location?.file || activeFileName;
-      islandLocation = `${file.split(/[\/\\]/).pop()}:${line}`;
-      islandMessage = analysis.summary || analysis.explanation || 'Active diagnostic analysis';
-      islandFile = file;
-      islandLine = line;
-      islandCol = analysis.location?.startColumn || 1;
+    if (workspaceIssues && workspaceIssues.length > 0) {
+      issuesToDisplay = workspaceIssues;
+    } else if (workspaceScanResult && workspaceScanResult.issues && workspaceScanResult.issues.length > 0) {
+      issuesToDisplay = workspaceScanResult.issues;
+    } else {
+      const collected = this.diagnosticCollector?.getWorkspaceDiagnostics(true) || [];
+      issuesToDisplay = collected.map((d) => ({
+        filePath: d.filePath || '',
+        line: d.startLine,
+        column: d.startColumn,
+        endLine: d.endLine,
+        endColumn: d.endColumn,
+        severity: d.severity,
+        message: d.message,
+        source: d.source || 'vscode',
+        code: d.code,
+        analyzer: d.source || 'vscode',
+        uri: d.uri,
+      }));
     }
 
-    // 1. Island Component Markup
-    let islandMarkup = '';
-    if (totalIssuesCount > 0 || analysis) {
-      islandMarkup = `
-        <section class="island-instrument" id="bugifyIsland" aria-expanded="false" aria-label="Active Diagnostic Island">
-          <button type="button" class="island-summary" id="islandToggleBtn" aria-expanded="false" aria-controls="islandBody">
-            <div class="island-summary-left">
-              <span class="island-pulse-dot" aria-hidden="true"></span>
-              <span class="island-lead-tag">BUGIFY</span>
-              <span class="island-badge">${totalIssuesCount}</span>
-              <span class="island-preview-text">${this.escapeHtml(islandCode ? `${islandCode} — ${islandMessage}` : 'Diagnostics monitored')}</span>
-            </div>
-            <span class="island-toggle-indicator" aria-hidden="true">▼</span>
-          </button>
-          <div class="island-expansion-wrap" id="islandBody">
-            <div class="island-expanded-content">
-              <div class="island-inner-padding">
-                <div class="island-target-row">
-                  <span class="sev-indicator error"><span class="sev-glyph">■</span><span>ERROR</span></span>
-                  <span class="island-code">${this.escapeHtml(islandCode)}</span>
-                  <span class="island-location">${this.escapeHtml(islandLocation)}</span>
-                </div>
-                <div class="island-detail-msg">${this.escapeHtml(islandMessage)}</div>
-                <div class="island-actions">
-                  <button type="button" class="btn btn-secondary btn-xs btn-view" data-file="${this.escapeHtml(islandFile)}" data-line="${islandLine}" data-col="${islandCol}" data-uri="${this.escapeHtml(islandUri)}">
-                    VIEW
-                  </button>
-                  <button type="button" class="btn btn-primary btn-xs btn-explain" data-file="${this.escapeHtml(islandFile)}" data-line="${islandLine}" data-col="${islandCol}" data-uri="${this.escapeHtml(islandUri)}" data-code="${this.escapeHtml(islandCode)}" data-msg="${this.escapeHtml(islandMessage)}" data-source="${this.escapeHtml(islandSource)}">
-                    EXPLAIN
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-      `;
-    }
+    // Filter to actionable issues only (Errors and Warnings)
+    const actionableIssues = issuesToDisplay.filter((i) => isActionableSeverity(i.severity));
+    const totalWorkspaceActionable = actionableIssues.length;
+    const errorCount = actionableIssues.filter((i) => i.severity === 'error').length;
+    const warningCount = actionableIssues.filter((i) => i.severity === 'warning').length;
 
-    // 2. Main Content Area Markup
+    // Header count & status indicators
+    const currentModeTotal = viewMode === 'workspace' ? totalWorkspaceActionable : activeCount;
+    const paddedTotal = currentModeTotal < 10 ? `0${currentModeTotal}` : `${currentModeTotal}`;
+    const headerBadgeLabel = `${paddedTotal} ${currentModeTotal === 1 ? 'ISSUE' : 'ISSUES'}`;
+    const headerStatusLabel = isScanningWorkspace ? 'SCANNING' : (aiAnalyzing ? 'ANALYZING' : 'READY');
+
+    // -------------------------------------------------------------
+    // MAIN CONTENT COMPILATION
+    // -------------------------------------------------------------
     let mainContentMarkup = '';
 
     if (loading) {
@@ -977,348 +980,130 @@ export class BugifyPanel {
         </div>
       `;
     } else if (viewMode === 'workspace') {
+      // -----------------------------------------------------------
+      // MODE A: WORKSPACE / CURRENT FOLDER MODE
+      // -----------------------------------------------------------
       if (isScanningWorkspace) {
+        // Section 19: Scanning Experience with Metrics & Progress
+        const filesScanned = workspaceScanResult?.summary.fileCount ?? 0;
+        const filesWithIssues = workspaceScanResult ? new Set(workspaceScanResult.issues.map(i => i.filePath)).size : 0;
+        const issuesFound = workspaceScanResult?.summary.totalIssues ?? 0;
+
         mainContentMarkup = `
           <div class="scan-card" role="status" aria-live="polite">
-            <div class="scan-card-header">
-              <span class="status-dot pulse" aria-hidden="true"></span>
-              <span class="scan-label">SCANNING WORKSPACE</span>
-              <button type="button" class="btn btn-secondary btn-xs" id="cancelScanBtn" style="margin-left: auto;">CANCEL</button>
+            <div class="scan-header">
+              <div class="scan-brand-title">BUGIFY</div>
+              <div class="scan-action-title">SCANNING WORKSPACE</div>
             </div>
             <div class="scan-line-container">
               <div class="scan-travelling-line"></div>
             </div>
-            <div class="scan-subtitle">Running workspace static analyzers across project files...</div>
+            <div class="scan-metrics-grid">
+              <div class="scan-metric-row">
+                <span class="metric-label">Files scanned</span>
+                <span class="metric-value">${filesScanned}</span>
+              </div>
+              <div class="scan-metric-row">
+                <span class="metric-label">Files with issues</span>
+                <span class="metric-value">${filesWithIssues}</span>
+              </div>
+              <div class="scan-metric-row">
+                <span class="metric-label">Issues found</span>
+                <span class="metric-value highlight-orange">${issuesFound}</span>
+              </div>
+            </div>
             <div class="analyzer-table">
               ${(scanProgressList || [])
                 .map((p) => {
                   let glyph = '○';
-                  let statusClass = 'status-pending';
+                  let statusClass = 'pending';
                   if (p.status === 'completed') {
                     glyph = '●';
-                    statusClass = 'status-completed';
+                    statusClass = 'completed';
                   } else if (p.status === 'running') {
                     glyph = '●';
-                    statusClass = 'status-running';
+                    statusClass = 'running';
                   } else if (p.status === 'timed_out' || p.status === 'failed') {
                     glyph = '■';
-                    statusClass = 'status-failed';
+                    statusClass = 'failed';
                   }
                   return `
                     <div class="analyzer-row ${statusClass}">
-                      <span class="analyzer-glyph">${glyph}</span>
-                      <span class="analyzer-name">${this.escapeHtml(p.name)}</span>
-                      <span class="analyzer-msg">${this.escapeHtml(p.message || p.status.toUpperCase())}</span>
+                      <span class="analyzer-cell-name"><span class="sev-glyph">${glyph}</span> ${this.escapeHtml(p.name)}</span>
+                      <span class="analyzer-cell-status">${this.escapeHtml(p.message || p.status.toUpperCase())}</span>
                     </div>
                   `;
                 })
                 .join('')}
             </div>
+            <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+              <button type="button" class="btn btn-secondary btn-xs" id="cancelScanBtn">CANCEL</button>
+            </div>
           </div>
         `;
-      } else if (issuesToDisplay.length > 0) {
+      } else if (totalWorkspaceActionable > 0) {
+        // Section 2 & 17: Workspace Issues List
+        const paddedCount = totalWorkspaceActionable < 10 ? `0${totalWorkspaceActionable}` : `${totalWorkspaceActionable}`;
+
         mainContentMarkup = `
-          <div class="workspace-issues-view">
-            <div class="filter-tablist" role="tablist" aria-label="Severity filter">
-              <button type="button" role="tab" class="filter-btn active" data-filter="all" aria-selected="true">
-                ALL <span class="filter-count">(${issuesToDisplay.length})</span>
-              </button>
-              <button type="button" role="tab" class="filter-btn" data-filter="error" aria-selected="false">
-                ERRORS <span class="filter-count">(${errorCount})</span>
-              </button>
-              <button type="button" role="tab" class="filter-btn" data-filter="warning" aria-selected="false">
-                WARNINGS <span class="filter-count">(${warningCount})</span>
-              </button>
-              <button type="button" class="btn btn-secondary btn-xs" id="rescanWorkspaceBtn" style="margin-left: auto;">
-                RESCAN
-              </button>
-            </div>
-
-            <div class="issue-rows-list" id="workspaceIssueList" role="list">
-              ${issuesToDisplay
-                .map((issue) => {
-                  const isError = issue.severity === 'error';
-                  const rowClass = isError ? 'row-error' : 'row-warning';
-                  const sevClass = isError ? 'error' : 'warning';
-                  const glyph = isError ? '■' : '△';
-                  const label = isError ? 'ERROR' : 'WARNING';
-                  const codeTag = issue.code || issue.source.toUpperCase();
-
-                  return `
-                    <div class="issue-row ${rowClass}" data-severity="${this.escapeHtml(issue.severity)}" role="listitem">
-                      <div class="issue-row-top">
-                        <div class="issue-label-group">
-                          <span class="sev-indicator ${sevClass}">
-                            <span class="sev-glyph" aria-hidden="true">${glyph}</span>
-                            <span>${label}</span>
-                          </span>
-                          <span class="issue-code-badge">${this.escapeHtml(codeTag)}</span>
-                          <span class="issue-analyzer-tag">[ ${this.escapeHtml(issue.analyzer)} ]</span>
-                        </div>
-                      </div>
-                      <div class="issue-file-location">
-                        <button type="button" class="loc-btn btn-view" data-file="${this.escapeHtml(issue.filePath)}" data-line="${issue.line}" data-col="${issue.column}" data-endline="${issue.endLine || ''}" data-endcol="${issue.endColumn || ''}" data-uri="${this.escapeHtml(issue.uri || '')}">
-                          ${this.formatFilePath(issue.filePath)}<span class="loc-pos">:${issue.line}:${issue.column}</span>
-                        </button>
-                      </div>
-                      <div class="issue-row-msg">${this.escapeHtml(issue.message)}</div>
-                      <div class="issue-row-actions">
-                        <button type="button" class="btn btn-secondary btn-xs btn-view" data-file="${this.escapeHtml(issue.filePath)}" data-line="${issue.line}" data-col="${issue.column}" data-endline="${issue.endLine || ''}" data-endcol="${issue.endColumn || ''}" data-uri="${this.escapeHtml(issue.uri || '')}">
-                          VIEW
-                        </button>
-                        <button type="button" class="btn btn-primary btn-xs btn-explain" data-file="${this.escapeHtml(issue.filePath)}" data-line="${issue.line}" data-col="${issue.column}" data-uri="${this.escapeHtml(issue.uri || '')}" data-code="${this.escapeHtml(issue.code || '')}" data-msg="${this.escapeHtml(issue.message)}" data-source="${this.escapeHtml(issue.source)}">
-                          EXPLAIN
-                        </button>
-                      </div>
-                    </div>
-                  `;
-                })
-                .join('')}
-            </div>
-          </div>
-        `;
-      } else {
-        mainContentMarkup = `
-          <div class="state-box" role="region" aria-label="Clean Diagnostics State">
-            <div class="state-title">NO CURRENT DIAGNOSTICS</div>
-            <div class="state-desc">The workspace has no diagnostics reported by the available analyzers.</div>
-            <button type="button" class="btn btn-secondary btn-sm" id="rescanWorkspaceBtn">SCAN WORKSPACE</button>
-          </div>
-        `;
-      }
-    } else if (analysis) {
-      const isAi = analysis.analysisSource === 'ai';
-      const line = analysis.location?.startLine || analysis.location?.line || 1;
-      const file = analysis.location?.file || this.state.activeFilePath || 'file';
-
-      const hasFix = !!analysis.correctedCode && analysis.status === 'fixed';
-      const isNeedsContext = analysis.status === 'needs_context';
-      const validationStatus = analysis.validation?.status || (hasFix ? 'generated' : 'needs_context');
-
-      let validationStepIcon = '○';
-      let validationStepClass = 'step-pending';
-      let validationStepLabel = 'VALIDATION PENDING';
-      let validationTitle = 'VALIDATION UNAVAILABLE';
-      let validationMsg = analysis.validation?.message || 'Code validation was not performed.';
-
-      if (validationStatus === 'validated') {
-        validationStepIcon = '●';
-        validationStepClass = 'step-done';
-        validationStepLabel = 'FIX VALIDATED';
-        validationTitle = `FIX VALIDATED (${(analysis.validation?.checkerUsed || 'AST').toUpperCase()} SYNTAX & TYPES SAFE)`;
-        validationMsg = analysis.validation?.message || 'Fix is consistent with diagnostic and passes syntax AST validation.';
-      } else if (validationStatus === 'generated') {
-        validationStepIcon = '●';
-        validationStepClass = 'step-active';
-        validationStepLabel = 'FIX GENERATED';
-        validationTitle = 'FIX GENERATED — NOT VERIFIED';
-        validationMsg = analysis.validation?.message || 'Syntactic validation checker unavailable for this language environment.';
-      } else if (validationStatus === 'needs_context') {
-        validationStepIcon = '△';
-        validationStepClass = 'step-pending';
-        validationStepLabel = 'NEEDS CONTEXT';
-        validationTitle = 'ADDITIONAL CONTEXT REQUIRED';
-        validationMsg = analysis.validation?.message || 'Bugify requires additional code context to safely propose a fix.';
-      } else if (validationStatus === 'validation_failed') {
-        validationStepIcon = '■';
-        validationStepClass = 'step-pending';
-        validationStepLabel = 'VALIDATION FAILED';
-        validationTitle = 'FIX VALIDATION FAILED';
-        validationMsg = analysis.validation?.message || 'Fix produced syntax errors or introduced anti-patterns.';
-      }
-
-      // Diff Block Markup
-      const diffMarkup = hasFix
-        ? `
-          <div class="report-section">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-              <span class="section-label">SUGGESTED FIX</span>
-              <button type="button" class="btn btn-secondary btn-xs" id="copyFixBtn" data-code="${this.escapeHtml(analysis.correctedCode)}">
-                COPY FIX
-              </button>
-            </div>
-            <div class="diff-container">
-              <div class="diff-pane diff-pane-del">
-                <div class="diff-pane-header">
-                  <span>CURRENT</span>
-                  <span>-${line}</span>
-                </div>
-                <pre class="diff-pre"><code class="diff-line-del">- ${this.escapeHtml(analysis.originalCode || '')}</code></pre>
-              </div>
-              <div class="diff-pane diff-pane-add">
-                <div class="diff-pane-header">
-                  <span>FIX</span>
-                  <span>+${line}</span>
-                </div>
-                <pre class="diff-pre"><code class="diff-line-add">+ ${this.escapeHtml(analysis.correctedCode || '')}</code></pre>
+          <div class="workspace-view">
+            <div class="workspace-section-header">
+              <div class="context-label">WORKSPACE</div>
+              <div class="context-issue-count">${paddedCount} ACTIONABLE ${totalWorkspaceActionable === 1 ? 'ISSUE' : 'ISSUES'}</div>
+              <div class="divider-line"></div>
+              <div class="filter-tablist" role="tablist" aria-label="Severity filter">
+                <button type="button" role="tab" class="filter-btn active" data-filter="all" aria-selected="true">
+                  ALL <span class="filter-count">(${totalWorkspaceActionable})</span>
+                </button>
+                <button type="button" role="tab" class="filter-btn" data-filter="error" aria-selected="false">
+                  ERRORS <span class="filter-count">(${errorCount})</span>
+                </button>
+                <button type="button" role="tab" class="filter-btn" data-filter="warning" aria-selected="false">
+                  WARNINGS <span class="filter-count">(${warningCount})</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-xs" id="rescanWorkspaceBtn" style="margin-left: auto;">
+                  RESCAN
+                </button>
               </div>
             </div>
-          </div>
-        `
-        : `
-          <div class="report-section">
-            <div class="section-label">SUGGESTED FIX</div>
-            <div class="state-box" style="padding: 12px; text-align: left; align-items: flex-start;">
-              <div class="state-title" style="color: var(--sev-warning);">AUTOMATED FIX WITHHELD</div>
-              <div class="state-desc" style="margin-bottom: 0;">${this.escapeHtml(
-                analysis.explanation ||
-                  'Bugify requires additional code context to safely generate a fix without guessing.'
-              )}</div>
-            </div>
-          </div>
-        `;
 
-      const aiNotice = aiError
-        ? `
-          <div class="state-box state-error" role="alert" style="margin-bottom: 8px;">
-            <div class="state-title">ANALYSIS SERVICE NOTICE</div>
-            <div class="state-desc">${this.escapeHtml(aiError)}</div>
-            ${canRetry ? '<button type="button" class="btn btn-secondary btn-xs" id="retryBtn">RETRY</button>' : ''}
-          </div>
-        `
-        : '';
-
-      const aiButtonLabel = aiAnalyzing
-        ? 'ANALYZING...'
-        : isAi
-        ? 'EXPLAIN MORE'
-        : 'EXPLAIN';
-
-      const aiButtonId = isAi ? 'explainMoreBtn' : 'analyzeAiBtn';
-
-      mainContentMarkup = `
-        <article class="report-panel">
-          <div class="report-breadcrumb">
-            <span class="breadcrumb-path">BUGIFY / ANALYSIS</span>
-            <span class="source-tag">SOURCE ${isAi ? 'MODEL' : 'RULES'}</span>
-          </div>
-
-          <div class="analysis-target-header">
-            <div class="analysis-headline">
-              <span class="sev-indicator error">
-                <span class="sev-glyph" aria-hidden="true">■</span>
-                <span>${this.escapeHtml(analysis.errorType)}</span>
-              </span>
-              <button type="button" class="loc-btn" id="revealLocationBtn" data-file="${this.escapeHtml(file)}" data-line="${line}">
-                ${this.formatFilePath(file)}<span class="loc-pos">:${line}</span>
-              </button>
-            </div>
-          </div>
-
-          ${aiNotice}
-
-          <!-- Pipeline Tracker -->
-          <div class="pipeline-tracker" aria-label="Analysis pipeline status">
-            <div class="pipeline-step step-done">
-              <span class="pipeline-step-glyph">●</span>
-              <span>DETECTED</span>
-            </div>
-            <div class="pipeline-step ${analysis.rootCause ? 'step-done' : ''}">
-              <span class="pipeline-step-glyph">${analysis.rootCause ? '●' : '○'}</span>
-              <span>ROOT CAUSE</span>
-            </div>
-            <div class="pipeline-step ${hasFix ? 'step-done' : (isNeedsContext ? 'step-active' : '')}">
-              <span class="pipeline-step-glyph">${hasFix ? '●' : (isNeedsContext ? '△' : '○')}</span>
-              <span>${hasFix ? 'FIX GENERATED' : (isNeedsContext ? 'NEEDS CONTEXT' : 'PENDING')}</span>
-            </div>
-            <div class="pipeline-step ${validationStepClass}">
-              <span class="pipeline-step-glyph">${validationStepIcon}</span>
-              <span>${validationStepLabel}</span>
-            </div>
-          </div>
-
-          <!-- Root cause section -->
-          <div class="report-section">
-            <div class="section-label">ROOT CAUSE</div>
-            <div class="section-prose" style="font-family: var(--font-mono); font-size: 12px; color: var(--text);">${this.escapeHtml(analysis.rootCause || analysis.cause || analysis.summary || 'Diagnostic root cause under investigation.')}</div>
-          </div>
-
-          <!-- Diff / Fix Block -->
-          ${diffMarkup}
-
-          <!-- Why section -->
-          <div class="report-section">
-            <div class="section-label">WHY</div>
-            <div class="section-prose">${this.escapeHtml(analysis.whyItHappens || analysis.explanation || 'Fix restores semantic compatibility and resolves diagnostic invariant.')}</div>
-          </div>
-
-          <!-- Validation Section -->
-          <div class="report-section">
-            <div class="section-label">VALIDATION</div>
-            <div class="validation-card">
-              <div class="validation-header">
-                <span>${validationStepIcon}</span>
-                <span>${this.escapeHtml(validationTitle)}</span>
-              </div>
-              <div class="validation-msg">${this.escapeHtml(validationMsg)}</div>
-            </div>
-          </div>
-
-          <!-- Actions Footer -->
-          <div class="report-footer">
-            <button type="button" class="btn btn-secondary btn-sm" id="viewCodeBtn" data-file="${this.escapeHtml(file)}" data-line="${line}">
-              VIEW CODE
-            </button>
-            ${
-              hasFix
-                ? `
-              <button type="button" class="btn btn-secondary btn-sm" id="copyFixFooterBtn" data-code="${this.escapeHtml(analysis.correctedCode)}">
-                COPY FIX
-              </button>
-              <button type="button" class="btn btn-primary btn-sm" id="applyFixBtn" data-file="${this.escapeHtml(file)}" data-line="${line}">
-                APPLY FIX
-              </button>
-            `
-                : ''
-            }
-            <button type="button" class="btn btn-secondary btn-sm" id="${aiButtonId}" ${aiAnalyzing ? 'disabled' : ''}>
-              ${aiButtonLabel}
-            </button>
-          </div>
-        </article>
-      `;
-    } else {
-      if (issues && issues.length > 0) {
-        mainContentMarkup = `
-          <div class="current-file-issues-view">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-              <span class="section-label">DIAGNOSTICS IN ${this.escapeHtml(activeFileName)}</span>
-              <span class="badge-count">${issues.length}</span>
-            </div>
-            <div class="issue-rows-list" id="issueList" role="list">
-              ${issues
+            <div class="workspace-issue-list" id="workspaceIssueList" role="list">
+              ${actionableIssues
                 .map((issue, idx) => {
-                  const isSelected = idx === selectedIssueIndex;
-                  const isError = issue.severity === 'error';
-                  const rowClass = isError ? 'row-error' : 'row-warning';
-                  const sevClass = isError ? 'error' : 'warning';
-                  const glyph = isError ? '■' : '△';
-                  const label = isError ? 'ERROR' : 'WARNING';
-                  const codeTag = issue.code || (issue.source ? issue.source.toUpperCase() : 'DIAGNOSTIC');
+                  const idxPadded = (idx + 1) < 10 ? `0${idx + 1}` : `${idx + 1}`;
+                  const sevMeta = getSeverityMetadata(issue.severity);
+                  const codeTag = issue.code || (issue.source ? issue.source.toUpperCase() : 'ISSUE');
 
                   return `
-                    <div class="issue-row ${rowClass} ${isSelected ? 'row-selected' : ''}" data-index="${idx}" role="listitem">
-                      <div class="issue-row-top">
-                        <div class="issue-label-group">
-                          <span class="sev-indicator ${sevClass}">
-                            <span class="sev-glyph" aria-hidden="true">${glyph}</span>
-                            <span>${label}</span>
+                    <div class="workspace-issue-item ${sevMeta.rowClass}" data-severity="${this.escapeHtml(issue.severity)}" data-file="${this.escapeHtml(issue.filePath)}" data-line="${issue.line}" data-col="${issue.column}" role="listitem">
+                      <div class="issue-item-index">${idxPadded}</div>
+                      <div class="issue-item-body">
+                        <div class="issue-item-meta">
+                          <span class="sev-indicator ${sevMeta.cssClass}">
+                            <span class="sev-glyph" aria-hidden="true">${sevMeta.glyph}</span>
+                            <span>${sevMeta.label}</span>
                           </span>
                           <span class="issue-code-badge">${this.escapeHtml(codeTag)}</span>
                         </div>
+                        <div class="issue-item-message">${this.escapeHtml(issue.message)}</div>
+                        <div class="issue-item-location">
+                          <span class="loc-path">${this.escapeHtml(issue.filePath)}</span>
+                          <span class="loc-coords">: L${issue.line}:C${issue.column}</span>
+                        </div>
                       </div>
-                      <div class="issue-file-location">
-                        <button type="button" class="loc-btn btn-view" data-file="${this.escapeHtml(this.state.activeFilePath || activeFileName)}" data-line="${issue.startLine}" data-col="${issue.startColumn}" data-uri="${this.escapeHtml(issue.uri || '')}">
-                          ${this.formatFilePath(activeFileName)}<span class="loc-pos">:${issue.startLine}</span>
-                        </button>
-                      </div>
-                      <div class="issue-row-msg">${this.escapeHtml(issue.message)}</div>
-                      <div class="issue-row-actions">
-                        <button type="button" class="btn btn-secondary btn-xs btn-view" data-file="${this.escapeHtml(this.state.activeFilePath || activeFileName)}" data-line="${issue.startLine}" data-col="${issue.startColumn}" data-uri="${this.escapeHtml(issue.uri || '')}">
-                          VIEW
-                        </button>
-                        <button type="button" class="btn btn-primary btn-xs btn-explain" data-file="${this.escapeHtml(this.state.activeFilePath || activeFileName)}" data-line="${issue.startLine}" data-col="${issue.startColumn}" data-uri="${this.escapeHtml(issue.uri || '')}" data-code="${this.escapeHtml(issue.code || '')}" data-msg="${this.escapeHtml(issue.message)}" data-source="${this.escapeHtml(issue.source)}">
-                          EXPLAIN
+                      <div class="issue-item-actions">
+                        <button type="button" class="btn btn-secondary btn-xs btn-open"
+                          data-file="${this.escapeHtml(issue.filePath)}"
+                          data-line="${issue.line}"
+                          data-col="${issue.column}"
+                          data-endline="${issue.endLine || ''}"
+                          data-endcol="${issue.endColumn || ''}"
+                          data-uri="${this.escapeHtml(issue.uri || '')}"
+                          data-code="${this.escapeHtml(issue.code || '')}"
+                          data-msg="${this.escapeHtml(issue.message)}"
+                          data-source="${this.escapeHtml(issue.source)}"
+                          data-severity="${this.escapeHtml(issue.severity)}">
+                          OPEN
                         </button>
                       </div>
                     </div>
@@ -1328,49 +1113,248 @@ export class BugifyPanel {
             </div>
           </div>
         `;
-      } else if (workspaceTotalCount > 0) {
+      } else {
+        // Section 20: Clean Empty State
         mainContentMarkup = `
-          <div class="state-box" role="region">
-            <div class="state-title">NO DIAGNOSTICS IN ACTIVE FILE</div>
-            <div class="state-desc">The open file has no compiler diagnostics. Bugify detected ${workspaceTotalCount} diagnostic${workspaceTotalCount === 1 ? '' : 's'} across other workspace files.</div>
-            <button type="button" class="btn btn-primary btn-sm" id="gotoWorkspaceBtn">
-              VIEW WORKSPACE ISSUES (${workspaceTotalCount})
-            </button>
+          <div class="state-box" role="region" aria-label="No Actionable Issues">
+            <div class="state-brand">BUGIFY</div>
+            <div class="state-title">NO ACTIONABLE ISSUES</div>
+            <div class="state-desc">Your workspace currently has no actionable errors or warnings.</div>
+            <button type="button" class="btn btn-secondary btn-sm" id="rescanWorkspaceBtn">SCAN WORKSPACE</button>
+          </div>
+        `;
+      }
+    } else {
+      // -----------------------------------------------------------
+      // MODE B: CURRENT FILE MODE
+      // -----------------------------------------------------------
+      if (!issues || issues.length === 0) {
+        // Section 18: Empty State when Active File has no issues
+        mainContentMarkup = `
+          <div class="current-file-empty-card" role="region">
+            <div class="context-label">CURRENT FILE</div>
+            <div class="current-file-name">${this.escapeHtml(activeFileName)}</div>
+            <div class="state-title" style="margin-top: 14px;">NO ACTIONABLE ISSUES</div>
+            <div class="state-desc" style="margin-top: 4px;">
+              ${totalWorkspaceActionable > 0
+                ? `Workspace contains ${totalWorkspaceActionable} other actionable issue${totalWorkspaceActionable === 1 ? '' : 's'}.`
+                : `Your workspace currently has no actionable errors or warnings.`}
+            </div>
+            ${totalWorkspaceActionable > 0 ? `
+              <button type="button" class="btn btn-primary btn-sm" id="gotoWorkspaceBtn" style="margin-top: 14px;">
+                VIEW WORKSPACE (${totalWorkspaceActionable})
+              </button>
+            ` : `
+              <button type="button" class="btn btn-secondary btn-sm" id="actionScanWorkspaceEmpty" style="margin-top: 14px;">
+                SCAN WORKSPACE
+              </button>
+            `}
           </div>
         `;
       } else {
+        // Section 2, 6, 7 & 18: Focused Debugging Intelligence View
+        const currentIssue = issues[selectedIssueIndex] || issues[0];
+        const selectedLine = currentIssue.startLine;
+        const selectedCol = currentIssue.startColumn;
+        const selectedFile = this.state.activeFilePath || activeFileName;
+        const selectedMessage = currentIssue.message;
+        const selectedCode = currentIssue.code || (currentIssue.source ? currentIssue.source.toUpperCase() : 'DIAGNOSTIC');
+        const selectedSevMeta = getSeverityMetadata(currentIssue.severity);
+        const activeCountPadded = activeCount < 10 ? `0${activeCount}` : `${activeCount}`;
+
+        // Intelligence fields (backed by local analysis or model analysis)
+        const whatHappened = analysis?.summary || analysis?.explanation || selectedMessage;
+        const rootCause = analysis?.rootCause || analysis?.cause || 'The symbol or expression violates lexical, syntactic, or typing rules.';
+        const whyItHappened = analysis?.whyItHappens || analysis?.explanation || 'Compilation or runtime failed to satisfy safety invariants.';
+        const hasSafeFix = !!analysis?.correctedCode && analysis?.status === 'fixed';
+        const recommendedActionText = hasSafeFix
+          ? (analysis?.explanation || 'Apply the corrected code fix to resolve the diagnostic.')
+          : (analysis?.suggestion || analysis?.explanation || 'Inspect the referenced line and update declarations or imports.');
+
+        // Verification & Confidence (Strict: Only VERIFIED if genuinely validated)
+        const isVerified = analysis?.verificationStatus === 'VERIFIED' || analysis?.validation?.status === 'validated';
+        const verificationText = isVerified
+          ? 'FIX VERIFIED'
+          : hasSafeFix
+          ? 'FIX GENERATED — NOT VERIFIED'
+          : 'NOT VERIFIED';
+        const verificationClass = isVerified ? 'verified' : 'unverified';
+        const verificationGlyph = isVerified ? '●' : '○';
+
+        const conf = analysis?.confidence || 0.8;
+        const confidenceText = analysis?.confidenceLevel || (conf >= 0.85 ? 'HIGH' : (conf >= 0.65 ? 'MEDIUM' : 'LOW'));
+        const confidenceClass = confidenceText.toLowerCase();
+
+        const aiNotice = aiError
+          ? `
+            <div class="state-box state-error" role="alert" style="margin-bottom: 8px;">
+              <div class="state-title">ANALYSIS SERVICE NOTICE</div>
+              <div class="state-desc">${this.escapeHtml(aiError)}</div>
+              ${canRetry ? '<button type="button" class="btn btn-secondary btn-xs" id="retryBtn">RETRY</button>' : ''}
+            </div>
+          `
+          : '';
+
         mainContentMarkup = `
-          <div class="state-box" role="region">
-            <div class="state-title">NO CURRENT DIAGNOSTICS</div>
-            <div class="state-desc">The workspace has no diagnostics reported by the available analyzers.</div>
-            <button type="button" class="btn btn-secondary btn-sm" id="rescanWorkspaceBtn">SCAN WORKSPACE</button>
+          <div class="current-file-view">
+            <div class="current-file-header">
+              <div class="context-label">CURRENT FILE</div>
+              <div class="current-file-name">${this.escapeHtml(activeFileName)}</div>
+              <div class="current-file-issue-count">${activeCountPadded} ${activeCount === 1 ? 'ISSUE' : 'ISSUES'}</div>
+            </div>
+
+            ${activeCount > 1 ? `
+              <div class="file-issue-tabs" role="tablist" aria-label="Issues in active file">
+                ${issues
+                  .map((iss, i) => {
+                    const isSelected = i === selectedIssueIndex;
+                    const sm = getSeverityMetadata(iss.severity);
+                    const idxPadded = (i + 1) < 10 ? `0${i + 1}` : `${i + 1}`;
+                    return `
+                      <button type="button" role="tab" class="file-issue-tab ${isSelected ? 'active' : ''}" data-index="${i}" aria-selected="${isSelected}">
+                        <span class="sev-glyph ${sm.cssClass}">${sm.glyph}</span>
+                        <span>${idxPadded} ${sm.label} (L${iss.startLine})</span>
+                      </button>
+                    `;
+                  })
+                  .join('')}
+              </div>
+            ` : ''}
+
+            <article class="debugging-card">
+              <div class="debugging-card-top">
+                <div class="issue-headline">
+                  <span class="sev-indicator ${selectedSevMeta.cssClass}">
+                    <span class="sev-glyph" aria-hidden="true">${selectedSevMeta.glyph}</span>
+                    <span>${selectedSevMeta.label}</span>
+                  </span>
+                  <span class="issue-code-badge">${this.escapeHtml(selectedCode)}</span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-xs btn-open-line" data-file="${this.escapeHtml(selectedFile)}" data-line="${selectedLine}" data-col="${selectedCol}">
+                  OPEN AT LINE
+                </button>
+              </div>
+
+              <div class="debugging-card-msg">${this.escapeHtml(selectedMessage)}</div>
+              <div class="debugging-card-loc">
+                <span class="loc-path">${this.escapeHtml(selectedFile)}</span>
+                <span class="loc-coords"> : Line ${selectedLine}, Column ${selectedCol}</span>
+              </div>
+
+              ${aiNotice}
+
+              <div class="card-divider"></div>
+
+              <!-- WHAT HAPPENED -->
+              <section class="intel-section">
+                <div class="intel-section-title">WHAT HAPPENED</div>
+                <div class="intel-section-prose">${this.escapeHtml(whatHappened)}</div>
+              </section>
+
+              <div class="card-divider"></div>
+
+              <!-- ROOT CAUSE -->
+              <section class="intel-section">
+                <div class="intel-section-title">ROOT CAUSE</div>
+                <div class="intel-section-prose">${this.escapeHtml(rootCause)}</div>
+              </section>
+
+              <div class="card-divider"></div>
+
+              <!-- WHY IT HAPPENED -->
+              <section class="intel-section">
+                <div class="intel-section-title">WHY IT HAPPENED</div>
+                <div class="intel-section-prose">${this.escapeHtml(whyItHappened)}</div>
+              </section>
+
+              <div class="card-divider"></div>
+
+              <!-- RECOMMENDED FIX or RECOMMENDED ACTION -->
+              <section class="intel-section">
+                <div class="intel-fix-header">
+                  <div class="intel-section-title">${hasSafeFix ? 'RECOMMENDED FIX' : 'RECOMMENDED ACTION'}</div>
+                  ${hasSafeFix ? `
+                    <div class="intel-fix-actions">
+                      <button type="button" class="btn btn-secondary btn-xs" id="copyFixBtn" data-code="${this.escapeHtml(analysis?.correctedCode || '')}">
+                        COPY FIX
+                      </button>
+                      <button type="button" class="btn btn-primary btn-xs" id="applyFixBtn" data-file="${this.escapeHtml(selectedFile)}" data-line="${selectedLine}" data-code="${this.escapeHtml(analysis?.correctedCode || '')}">
+                        APPLY FIX
+                      </button>
+                    </div>
+                  ` : ''}
+                </div>
+                <div class="intel-section-prose">${this.escapeHtml(recommendedActionText)}</div>
+
+                ${hasSafeFix ? `
+                  <div class="diff-container" style="margin-top: 8px;">
+                    <div class="diff-pane diff-pane-del">
+                      <div class="diff-pane-header">
+                        <span>CURRENT</span>
+                        <span>-${selectedLine}</span>
+                      </div>
+                      <pre class="diff-pre"><code class="diff-line-del">- ${this.escapeHtml(analysis?.originalCode || '')}</code></pre>
+                    </div>
+                    <div class="diff-pane diff-pane-add">
+                      <div class="diff-pane-header">
+                        <span>FIX</span>
+                        <span>+${selectedLine}</span>
+                      </div>
+                      <pre class="diff-pre"><code class="diff-line-add">+ ${this.escapeHtml(analysis?.correctedCode || '')}</code></pre>
+                    </div>
+                  </div>
+                ` : ''}
+              </section>
+
+              <div class="card-divider"></div>
+
+              <!-- CONFIDENCE & VERIFICATION -->
+              <section class="intel-section-grid">
+                <div class="grid-cell">
+                  <span class="grid-cell-label">CONFIDENCE</span>
+                  <span class="grid-cell-value confidence-${confidenceClass}">${confidenceText}</span>
+                </div>
+                <div class="grid-cell">
+                  <span class="grid-cell-label">VERIFICATION</span>
+                  <span class="grid-cell-value verification-${verificationClass}">
+                    <span class="verification-glyph">${verificationGlyph}</span>
+                    <span>${verificationText}</span>
+                  </span>
+                </div>
+              </section>
+
+              <!-- Card Action Footer -->
+              <div class="debugging-card-footer">
+                <button type="button" class="btn btn-secondary btn-sm btn-open-line" data-file="${this.escapeHtml(selectedFile)}" data-line="${selectedLine}" data-col="${selectedCol}">
+                  OPEN AT LINE
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="explainMoreBtn" ${aiAnalyzing ? 'disabled' : ''}>
+                  ${aiAnalyzing ? 'ANALYZING...' : 'EXPLAIN MORE'}
+                </button>
+              </div>
+            </article>
           </div>
         `;
       }
     }
 
-    const headerIssueCountLabel = `${totalIssuesCount} ISSUE${totalIssuesCount === 1 ? '' : 'S'}`;
-    const headerStatusLabel = isScanningWorkspace ? 'SCANNING' : (aiAnalyzing ? 'ANALYZING' : 'SYSTEM READY');
-
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.panel.webview.cspSource} 'unsafe-inline'; font-src ${this.panel.webview.cspSource}; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.panel.webview.cspSource} 'unsafe-inline'; font-src ${this.panel.webview.cspSource}; img-src ${this.panel.webview.cspSource} https: data:; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bugify</title>
   <link rel="stylesheet" href="${stylesheetUri}">
 </head>
 <body class="bugify-instrument-surface">
-  <!-- Header Bar -->
+  <!-- Brand Header Bar -->
   <header class="header-bar ${isScanningWorkspace ? 'is-scanning' : ''}">
     <div class="brand-group">
-      <svg class="brand-mark" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M3 4H9V6H5V18H9V20H3V4ZM21 4H15V6H19V18H15V20H21V4ZM10 10H14V14H10V10Z"/>
-      </svg>
+      <img src="${logoUri}" alt="Bugify" class="brand-logo-img" width="22" height="22" />
       <div class="brand-meta">
         <span class="brand-wordmark">BUGIFY</span>
-        <span class="brand-subtitle">Workspace Intelligence &bull; DEBUG INTELLIGENCE</span>
+        <span class="brand-subtitle">DEBUG INTELLIGENCE</span>
       </div>
     </div>
     <div class="header-status-group">
@@ -1378,34 +1362,28 @@ export class BugifyPanel {
         <span class="status-dot ${isScanningWorkspace || aiAnalyzing ? 'pulse' : 'clean'}" aria-hidden="true"></span>
         <span>${headerStatusLabel}</span>
       </div>
-      <span class="badge-count ${totalIssuesCount > 0 ? 'has-issues' : ''}">${headerIssueCountLabel}</span>
+      <span class="badge-count ${currentModeTotal > 0 ? 'has-issues' : ''}">${headerBadgeLabel}</span>
     </div>
     <div class="header-scan-track" aria-hidden="true">
       <div class="header-scan-pulse"></div>
     </div>
   </header>
 
-  <!-- Island HUD Component -->
-  ${islandMarkup}
-
-  <!-- Navigation Mode Bar -->
+  <!-- Context Navigation Mode Bar -->
   <nav class="mode-bar" aria-label="View mode">
     <div class="mode-tablist" role="tablist">
       <button type="button" role="tab" aria-selected="${viewMode === 'workspace'}" class="mode-tab-btn ${viewMode === 'workspace' ? 'active' : ''}" id="tabWorkspace">
         WORKSPACE
-        <span class="tab-pill-count">${workspaceTotalCount}</span>
+        <span class="tab-pill-count">${totalWorkspaceActionable < 10 ? `0${totalWorkspaceActionable}` : totalWorkspaceActionable}</span>
       </button>
       <button type="button" role="tab" aria-selected="${viewMode === 'current_file'}" class="mode-tab-btn ${viewMode === 'current_file' ? 'active' : ''}" id="tabCurrentFile">
-        ACTIVE FILE
-        <span class="tab-pill-count">${activeCount}</span>
+        CURRENT FILE
+        <span class="tab-pill-count">${activeCount < 10 ? `0${activeCount}` : activeCount}</span>
       </button>
     </div>
     <div class="mode-actions">
-      <button type="button" class="btn btn-secondary btn-sm" id="actionScanWorkspace">
-        SCAN WORKSPACE
-      </button>
-      <button type="button" class="btn btn-secondary btn-sm" id="actionAnalyzeCurrent">
-        ANALYZE ACTIVE
+      <button type="button" class="btn btn-secondary btn-xs" id="actionScanWorkspace">
+        ${isScanningWorkspace ? 'SCANNING...' : 'SCAN WORKSPACE'}
       </button>
     </div>
   </nav>
@@ -1418,7 +1396,7 @@ export class BugifyPanel {
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
 
-    // Mode tabs
+    // Mode tab switching
     const tabWorkspace = document.getElementById('tabWorkspace');
     if (tabWorkspace) {
       tabWorkspace.addEventListener('click', () => {
@@ -1433,7 +1411,7 @@ export class BugifyPanel {
       });
     }
 
-    // Action buttons in mode bar
+    // Scan workspace triggers
     const actionScanWorkspace = document.getElementById('actionScanWorkspace');
     if (actionScanWorkspace) {
       actionScanWorkspace.addEventListener('click', () => {
@@ -1448,10 +1426,17 @@ export class BugifyPanel {
       });
     }
 
-    const actionAnalyzeCurrent = document.getElementById('actionAnalyzeCurrent');
-    if (actionAnalyzeCurrent) {
-      actionAnalyzeCurrent.addEventListener('click', () => {
-        vscode.postMessage({ command: 'analyze-ai' });
+    const actionScanWorkspaceEmpty = document.getElementById('actionScanWorkspaceEmpty');
+    if (actionScanWorkspaceEmpty) {
+      actionScanWorkspaceEmpty.addEventListener('click', () => {
+        vscode.postMessage({ command: 'scan-workspace' });
+      });
+    }
+
+    const cancelScanBtn = document.getElementById('cancelScanBtn');
+    if (cancelScanBtn) {
+      cancelScanBtn.addEventListener('click', () => {
+        vscode.postMessage({ command: 'cancel-scan' });
       });
     }
 
@@ -1462,29 +1447,7 @@ export class BugifyPanel {
       });
     }
 
-    // Island Component interaction (expand, collapse, keyboard navigation)
-    const island = document.getElementById('bugifyIsland');
-    const islandToggleBtn = document.getElementById('islandToggleBtn');
-    if (island && islandToggleBtn) {
-      const toggleIsland = () => {
-        const isExpanded = island.getAttribute('aria-expanded') === 'true';
-        island.setAttribute('aria-expanded', String(!isExpanded));
-        islandToggleBtn.setAttribute('aria-expanded', String(!isExpanded));
-      };
-
-      islandToggleBtn.addEventListener('click', toggleIsland);
-      islandToggleBtn.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          toggleIsland();
-        } else if (e.key === 'Escape') {
-          island.setAttribute('aria-expanded', 'false');
-          islandToggleBtn.setAttribute('aria-expanded', 'false');
-        }
-      });
-    }
-
-    // Severity Filter Tabs (role="tablist" with arrow key support)
+    // Filter tabs in Workspace View
     const filterTabs = Array.from(document.querySelectorAll('.filter-btn'));
     filterTabs.forEach((tab, index) => {
       tab.addEventListener('click', () => {
@@ -1496,7 +1459,7 @@ export class BugifyPanel {
         tab.setAttribute('aria-selected', 'true');
 
         const filter = tab.getAttribute('data-filter');
-        const rows = document.querySelectorAll('.issue-row');
+        const rows = document.querySelectorAll('.workspace-issue-item');
         rows.forEach(row => {
           const sev = row.getAttribute('data-severity');
           if (filter === 'all' || sev === filter) {
@@ -1522,7 +1485,16 @@ export class BugifyPanel {
       });
     });
 
-    // Copy Fix with 1.5s visual feedback
+    // File issue tabs in Current File View
+    const issueTabs = document.querySelectorAll('.file-issue-tab');
+    issueTabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const index = parseInt(tab.getAttribute('data-index') || '0', 10);
+        vscode.postMessage({ command: 'select-issue', index });
+      });
+    });
+
+    // Copy Fix with feedback
     function handleCopy(button, text) {
       if (!button || !text) return;
       vscode.postMessage({ command: 'copy-code', code: text });
@@ -1542,70 +1514,18 @@ export class BugifyPanel {
       });
     }
 
-    const copyFixFooterBtn = document.getElementById('copyFixFooterBtn');
-    if (copyFixFooterBtn) {
-      copyFixFooterBtn.addEventListener('click', () => {
-        handleCopy(copyFixFooterBtn, copyFixFooterBtn.getAttribute('data-code'));
+    // Apply Fix
+    const applyFixBtn = document.getElementById('applyFixBtn');
+    if (applyFixBtn) {
+      applyFixBtn.addEventListener('click', () => {
+        const file = applyFixBtn.getAttribute('data-file');
+        const line = parseInt(applyFixBtn.getAttribute('data-line') || '1', 10);
+        const code = applyFixBtn.getAttribute('data-code');
+        vscode.postMessage({ command: 'apply-fix', file, line, code });
       });
     }
 
-    // Action buttons & Issue row event delegation
-    document.addEventListener('click', (e) => {
-      const viewBtn = e.target.closest('.btn-view');
-      if (viewBtn) {
-        const file = viewBtn.getAttribute('data-file');
-        const line = parseInt(viewBtn.getAttribute('data-line') || '1', 10);
-        const column = parseInt(viewBtn.getAttribute('data-col') || '1', 10);
-        const endLine = parseInt(viewBtn.getAttribute('data-endline') || '0', 10) || undefined;
-        const endColumn = parseInt(viewBtn.getAttribute('data-endcol') || '0', 10) || undefined;
-        const uri = viewBtn.getAttribute('data-uri');
-        vscode.postMessage({ command: 'view-issue', file, line, column, endLine, endColumn, uri });
-        return;
-      }
-
-      const explainBtn = e.target.closest('.btn-explain');
-      if (explainBtn) {
-        const file = explainBtn.getAttribute('data-file');
-        const line = parseInt(explainBtn.getAttribute('data-line') || '1', 10);
-        const column = parseInt(explainBtn.getAttribute('data-col') || '1', 10);
-        const uri = explainBtn.getAttribute('data-uri');
-        const code = explainBtn.getAttribute('data-code');
-        const message = explainBtn.getAttribute('data-msg');
-        const source = explainBtn.getAttribute('data-source');
-        vscode.postMessage({
-          command: 'explain-issue',
-          file,
-          line,
-          column,
-          uri,
-          code,
-          message,
-          source
-        });
-        return;
-      }
-
-      const cancelScanBtn = e.target.closest('#cancelScanBtn');
-      if (cancelScanBtn) {
-        vscode.postMessage({ command: 'cancel-scan' });
-        return;
-      }
-
-      const rowTarget = e.target.closest('.issue-row[data-index]');
-      if (rowTarget && !e.target.closest('button')) {
-        const index = parseInt(rowTarget.getAttribute('data-index') || '0', 10);
-        vscode.postMessage({ command: 'select-issue', index });
-      }
-    });
-
-    // AI Analysis triggers
-    const analyzeAiBtn = document.getElementById('analyzeAiBtn');
-    if (analyzeAiBtn) {
-      analyzeAiBtn.addEventListener('click', () => {
-        vscode.postMessage({ command: 'analyze-ai' });
-      });
-    }
-
+    // Explain More AI trigger
     const explainMoreBtn = document.getElementById('explainMoreBtn');
     if (explainMoreBtn) {
       explainMoreBtn.addEventListener('click', () => {
@@ -1613,47 +1533,56 @@ export class BugifyPanel {
       });
     }
 
-    // Apply fix
-    const applyFixBtn = document.getElementById('applyFixBtn');
-    if (applyFixBtn) {
-      applyFixBtn.addEventListener('click', () => {
-        const file = applyFixBtn.getAttribute('data-file');
-        const line = parseInt(applyFixBtn.getAttribute('data-line') || '1', 10);
-        const code = copyFixBtn ? copyFixBtn.getAttribute('data-code') : undefined;
-        vscode.postMessage({ command: 'apply-fix', file, line, code });
-      });
-    }
-
-    // View Code / Reveal location links
-    const viewCodeBtn = document.getElementById('viewCodeBtn');
-    if (viewCodeBtn) {
-      viewCodeBtn.addEventListener('click', () => {
-        const file = viewCodeBtn.getAttribute('data-file');
-        const line = parseInt(viewCodeBtn.getAttribute('data-line') || '1', 10);
-        vscode.postMessage({ command: 'reveal-line', file, line });
-      });
-    }
-
-    const revealLocationBtn = document.getElementById('revealLocationBtn');
-    if (revealLocationBtn) {
-      revealLocationBtn.addEventListener('click', () => {
-        const file = revealLocationBtn.getAttribute('data-file');
-        const line = parseInt(revealLocationBtn.getAttribute('data-line') || '1', 10);
-        vscode.postMessage({ command: 'reveal-line', file, line });
-      });
-    }
-
-    // Retry button
+    // Retry Button
     const retryBtn = document.getElementById('retryBtn');
     if (retryBtn) {
       retryBtn.addEventListener('click', () => {
         vscode.postMessage({ command: 'retry' });
       });
     }
+
+    // Document click delegation for opening issues and jumping to lines
+    document.addEventListener('click', (e) => {
+      // 1. Click on [ OPEN ] or anywhere on workspace issue row
+      const openBtn = e.target.closest('.btn-open') || e.target.closest('.workspace-issue-item');
+      if (openBtn && !e.target.closest('.filter-btn')) {
+        const file = openBtn.getAttribute('data-file');
+        const line = parseInt(openBtn.getAttribute('data-line') || '1', 10);
+        const column = parseInt(openBtn.getAttribute('data-col') || '1', 10);
+        const uri = openBtn.getAttribute('data-uri');
+        const code = openBtn.getAttribute('data-code');
+        const message = openBtn.getAttribute('data-msg');
+        const source = openBtn.getAttribute('data-source');
+        const severity = openBtn.getAttribute('data-severity');
+
+        vscode.postMessage({
+          command: 'open-issue',
+          file,
+          line,
+          column,
+          uri,
+          code,
+          message,
+          source,
+          severity
+        });
+        return;
+      }
+
+      // 2. Click on [ OPEN AT LINE ]
+      const lineBtn = e.target.closest('.btn-open-line');
+      if (lineBtn) {
+        const file = lineBtn.getAttribute('data-file');
+        const line = parseInt(lineBtn.getAttribute('data-line') || '1', 10);
+        vscode.postMessage({ command: 'reveal-line', file, line });
+        return;
+      }
+    });
   </script>
 </body>
 </html>`;
   }
+
   public dispose(): void {
     BugifyPanel.currentPanel = undefined;
     this.panel.dispose();
@@ -1663,3 +1592,4 @@ export class BugifyPanel {
     }
   }
 }
+

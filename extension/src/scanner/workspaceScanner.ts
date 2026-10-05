@@ -113,7 +113,7 @@ export class WorkspaceScanner {
         const tscRes = await runTscAnalyzer(
           wsRoot,
           capabilities.tsconfigPaths,
-          capabilities.tscExecutable,
+          capabilities.sourceFiles,
           token
         );
         allRawIssues.push(...tscRes.issues);
@@ -125,7 +125,7 @@ export class WorkspaceScanner {
           type: 'tsc',
           status: 'not_configured',
           issueCount: 0,
-          message: 'No tsconfig.json or jsconfig.json found.',
+          message: 'No TypeScript or JavaScript files found.',
         });
       }
 
@@ -178,7 +178,7 @@ export class WorkspaceScanner {
         const pyRes = await runPythonAnalyzer(
           wsRoot,
           capabilities.hasPython,
-          capabilities.pyrightExecutable,
+          capabilities.pythonSourceFiles,
           token
         );
         allRawIssues.push(...pyRes.issues);

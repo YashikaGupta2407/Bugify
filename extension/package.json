@@ -35,6 +35,11 @@
   "contributes": {
     "commands": [
       {
+        "command": "bugify.openWorkspace",
+        "title": "Bugify: Open Workspace Issues",
+        "category": "Bugify"
+      },
+      {
         "command": "bugify.openPanel",
         "title": "Bugify: Open Panel",
         "category": "Bugify"
@@ -89,8 +94,7 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node --test test/pure.test.js test/workspaceScan.integration.test.js test/closedFileScan.acceptance.test.js",
+    "test": "npm run compile && node --test test/pure.test.js test/workspaceScan.integration.test.js test/closedFileScan.acceptance.test.js test/realWorldDebugging.acceptance.test.js",
     "package": "npx @vscode/vsce package --no-dependencies --allow-missing-repository",
     "host": "npm run compile && \"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/test-fixtures\"",
     "host:antigravity": "npm run compile && \"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/test-fixtures\""

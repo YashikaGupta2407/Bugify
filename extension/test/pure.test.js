@@ -7,6 +7,8 @@ const { extractCodeWindow, capSelection } = require('../out/context/windowing');
 const {
   normalizeDiagnosticCode,
   mapDiagnosticSeverity,
+  isActionableSeverity,
+  getSeverityMetadata,
   convertTo1Based,
   findDiagnosticAtCursor,
   findNearestDiagnostic,
@@ -304,7 +306,191 @@ describe('Local Diagnostic Explanations (Instant Offline Display)', () => {
     const res = buildLocalAnalysis(diagnostic, 'extension/test-fixtures/js-reference.js');
 
     assert.strictEqual(res.errorType, 'ReferenceError');
+    assert.strictEqual(res.status, 'needs_context');
+    assert.strictEqual(res.correctedCode, null, 'Must NOT fabricate arbitrary code fixes like const username = ""');
+    assert.ok(res.rootCause.includes('username'));
     assert.ok(res.explanation.includes('declared or imported'));
+    assert.ok(res.suggestion.includes('username'));
+    assert.strictEqual(res.validation.status, 'needs_context');
+  });
+
+  test('builds instant local analysis for CommonJS to ES Module conversion (TS80001)', () => {
+    const diagnostic = {
+      severity: 'information',
+      message: 'File is a CommonJS module; it may be converted to an ES module.',
+      source: 'ts',
+      code: '80001',
+      startLine: 1,
+      startColumn: 1,
+      endLine: 1,
+      endColumn: 10,
+    };
+
+    const res = buildLocalAnalysis(diagnostic, 'extension/src/server.js');
+
+    // TS80001 MUST NEVER be classified as ERROR, WARNING, TS Warning, or BUG
+    assert.strictEqual(res.errorType, 'TS Information');
+    assert.notStrictEqual(res.errorType, 'TS Warning');
+    assert.notStrictEqual(res.errorType, 'ERROR');
+    assert.notStrictEqual(res.errorType, 'BUG');
+    assert.strictEqual(res.severity, 'information');
+    assert.notStrictEqual(res.severity, 'error');
+    assert.notStrictEqual(res.severity, 'warning');
+    assert.strictEqual(res.title, 'Module Conversion Suggestion');
+    assert.strictEqual(isActionableSeverity(res.severity), false);
+    assert.ok(res.rootCause.includes('TS80001'));
+    assert.ok(res.explanation.includes('informational diagnostic'));
+  });
+
+  test('dynamically classifies unused identifier diagnostics by severity without hardcoding messages', () => {
+    const unusedDiag1 = {
+      severity: 'information',
+      message: "'originalCode' is declared but its value is never read.",
+      source: 'ts',
+      code: '6133',
+      startLine: 12,
+      startColumn: 9,
+      endLine: 12,
+      endColumn: 21,
+    };
+
+    const res1 = buildLocalAnalysis(unusedDiag1, 'extension/src/ui/panel.ts');
+    assert.strictEqual(res1.errorType, 'TS Information');
+    assert.strictEqual(res1.severity, 'information');
+    assert.strictEqual(isActionableSeverity(res1.severity), false);
+
+    const unusedDiag2 = {
+      severity: 'information',
+      message: "'diagnostic' is declared but its value is never read.",
+      source: 'ts',
+      code: '6133',
+      startLine: 18,
+      startColumn: 9,
+      endLine: 18,
+      endColumn: 19,
+    };
+
+    const res2 = buildLocalAnalysis(unusedDiag2, 'extension/src/ui/panel.ts');
+    assert.strictEqual(res2.errorType, 'TS Information');
+    assert.strictEqual(res2.severity, 'information');
+    assert.strictEqual(isActionableSeverity(res2.severity), false);
+  });
+});
+
+describe('Diagnostic Severity Classification & Filtering Pipeline', () => {
+  test('VS Code DiagnosticSeverity.Error (0) → ERROR → visible & actionable', () => {
+    assert.strictEqual(mapDiagnosticSeverity(0), 'error');
+    assert.strictEqual(isActionableSeverity(0), true);
+    assert.strictEqual(isActionableSeverity('error'), true);
+
+    const meta = getSeverityMetadata(0);
+    assert.strictEqual(meta.severity, 'error');
+    assert.strictEqual(meta.label, 'ERROR');
+    assert.strictEqual(meta.cssClass, 'error');
+    assert.strictEqual(meta.rowClass, 'row-error');
+    assert.strictEqual(meta.glyph, '■');
+    assert.strictEqual(meta.isActionable, true);
+  });
+
+  test('VS Code DiagnosticSeverity.Warning (1) → WARNING → visible & actionable', () => {
+    assert.strictEqual(mapDiagnosticSeverity(1), 'warning');
+    assert.strictEqual(isActionableSeverity(1), true);
+    assert.strictEqual(isActionableSeverity('warning'), true);
+
+    const meta = getSeverityMetadata(1);
+    assert.strictEqual(meta.severity, 'warning');
+    assert.strictEqual(meta.label, 'WARNING');
+    assert.strictEqual(meta.cssClass, 'warning');
+    assert.strictEqual(meta.rowClass, 'row-warning');
+    assert.strictEqual(meta.glyph, '△');
+    assert.strictEqual(meta.isActionable, true);
+  });
+
+  test('VS Code DiagnosticSeverity.Information (2) → INFORMATION → hidden from default actionable list', () => {
+    assert.strictEqual(mapDiagnosticSeverity(2), 'information');
+    assert.strictEqual(isActionableSeverity(2), false);
+    assert.strictEqual(isActionableSeverity('information'), false);
+
+    const meta = getSeverityMetadata(2);
+    assert.strictEqual(meta.severity, 'information');
+    assert.strictEqual(meta.label, 'INFORMATION');
+    assert.strictEqual(meta.cssClass, 'info');
+    assert.strictEqual(meta.rowClass, 'row-info');
+    assert.strictEqual(meta.glyph, '○');
+    assert.strictEqual(meta.isActionable, false);
+  });
+
+  test('VS Code DiagnosticSeverity.Hint (3) → HINT → hidden from default actionable list', () => {
+    assert.strictEqual(mapDiagnosticSeverity(3), 'hint');
+    assert.strictEqual(isActionableSeverity(3), false);
+    assert.strictEqual(isActionableSeverity('hint'), false);
+
+    const meta = getSeverityMetadata(3);
+    assert.strictEqual(meta.severity, 'hint');
+    assert.strictEqual(meta.label, 'HINT');
+    assert.strictEqual(meta.cssClass, 'info');
+    assert.strictEqual(meta.rowClass, 'row-info');
+    assert.strictEqual(meta.glyph, '○');
+    assert.strictEqual(meta.isActionable, false);
+  });
+
+  test('Default actionable filtering hides Information and Hint while preserving Errors and Warnings', () => {
+    const rawDiagnostics = [
+      {
+        severity: 'error',
+        message: "Type 'string' is not assignable to type 'number'.",
+        source: 'ts',
+        code: '2322',
+        startLine: 3,
+        startColumn: 1,
+      },
+      {
+        severity: 'warning',
+        message: "Variable 'unusedLocal' is declared but never used.",
+        source: 'ts',
+        code: '6133',
+        startLine: 10,
+        startColumn: 5,
+      },
+      {
+        severity: 'information',
+        message: 'File is a CommonJS module; it may be converted to an ES module.',
+        source: 'ts',
+        code: '80001',
+        startLine: 1,
+        startColumn: 1,
+      },
+      {
+        severity: 'information',
+        message: "'originalCode' is declared but its value is never read.",
+        source: 'ts',
+        code: '6133',
+        startLine: 15,
+        startColumn: 7,
+      },
+      {
+        severity: 'hint',
+        message: 'Prefix with underscore to ignore.',
+        source: 'ts',
+        startLine: 20,
+        startColumn: 1,
+      },
+    ];
+
+    // Filter by actionable severity
+    const actionable = rawDiagnostics.filter((d) => isActionableSeverity(d.severity));
+
+    // Must contain exactly 2 actionable issues (1 Error, 1 Warning)
+    assert.strictEqual(actionable.length, 2);
+    assert.strictEqual(actionable[0].severity, 'error');
+    assert.strictEqual(actionable[1].severity, 'warning');
+
+    // Information and Hint diagnostics must be completely hidden from default list
+    const nonActionable = rawDiagnostics.filter((d) => !isActionableSeverity(d.severity));
+    assert.strictEqual(nonActionable.length, 3);
+    assert.strictEqual(nonActionable.some((d) => d.code === '80001'), true);
+    assert.strictEqual(nonActionable.some((d) => d.message.includes('originalCode')), true);
+    assert.strictEqual(nonActionable.some((d) => d.severity === 'hint'), true);
   });
 });
 
