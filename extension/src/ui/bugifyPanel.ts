@@ -53,7 +53,10 @@ export interface PanelViewState {
 
 export class BugifyPanel {
   public static currentPanel: BugifyPanel | undefined;
-  private readonly panel: vscode.WebviewPanel;
+  public static currentSidebarPanel: BugifyPanel | undefined;
+  private readonly panel?: vscode.WebviewPanel;
+  private readonly view?: vscode.WebviewView;
+  private readonly webview: vscode.Webview;
   private readonly extensionUri: vscode.Uri;
   private disposables: vscode.Disposable[] = [];
   private apiClient: BugifyApiClient;
@@ -91,7 +94,7 @@ export class BugifyPanel {
       }
       BugifyPanel.currentPanel.refreshWorkspaceData();
       BugifyPanel.currentPanel.render();
-      BugifyPanel.currentPanel.panel.reveal(column);
+      BugifyPanel.currentPanel.panel?.reveal(column);
       return BugifyPanel.currentPanel;
     }
 
@@ -107,23 +110,61 @@ export class BugifyPanel {
     );
 
     BugifyPanel.currentPanel = new BugifyPanel(
-      panel,
+      panel.webview,
       extensionUri,
       apiClient,
       diagnosticCollector,
-      workspaceScanner
+      workspaceScanner,
+      panel
     );
     return BugifyPanel.currentPanel;
   }
 
-  private constructor(
-    panel: vscode.WebviewPanel,
+  public static createForWebviewView(
+    view: vscode.WebviewView,
     extensionUri: vscode.Uri,
     apiClient: BugifyApiClient,
     diagnosticCollector: DiagnosticCollector,
     workspaceScanner?: WorkspaceScanner
+  ): BugifyPanel {
+    if (BugifyPanel.currentSidebarPanel) {
+      BugifyPanel.currentSidebarPanel.diagnosticCollector = diagnosticCollector;
+      if (workspaceScanner) {
+        BugifyPanel.currentSidebarPanel.workspaceScanner = workspaceScanner;
+      }
+      BugifyPanel.currentSidebarPanel.refreshWorkspaceData();
+      BugifyPanel.currentSidebarPanel.render();
+      return BugifyPanel.currentSidebarPanel;
+    }
+
+    const sidebarPanel = new BugifyPanel(
+      view.webview,
+      extensionUri,
+      apiClient,
+      diagnosticCollector,
+      workspaceScanner,
+      undefined,
+      view
+    );
+    sidebarPanel.state.viewMode = 'workspace';
+    sidebarPanel.refreshWorkspaceData();
+    sidebarPanel.render();
+    BugifyPanel.currentSidebarPanel = sidebarPanel;
+    return sidebarPanel;
+  }
+
+  private constructor(
+    webview: vscode.Webview,
+    extensionUri: vscode.Uri,
+    apiClient: BugifyApiClient,
+    diagnosticCollector: DiagnosticCollector,
+    workspaceScanner?: WorkspaceScanner,
+    panel?: vscode.WebviewPanel,
+    view?: vscode.WebviewView
   ) {
+    this.webview = webview;
     this.panel = panel;
+    this.view = view;
     this.extensionUri = extensionUri;
     this.apiClient = apiClient;
     this.diagnosticCollector = diagnosticCollector;
@@ -132,7 +173,12 @@ export class BugifyPanel {
     this.refreshWorkspaceData();
     this.render();
 
-    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    if (this.panel) {
+      this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    }
+    if (this.view) {
+      this.view.onDidDispose(() => this.dispose(), null, this.disposables);
+    }
 
     // Auto-refresh when diagnostics change across the workspace
     this.diagnosticCollector.onDiagnosticsChanged(() => {
@@ -142,8 +188,19 @@ export class BugifyPanel {
       }
     }, null, this.disposables);
 
+    // Auto-refresh when workspace scan completes
+    if (this.workspaceScanner) {
+      this.workspaceScanner.onScanComplete((result) => {
+        this.state.workspaceScanResult = result;
+        this.state.workspaceIssues = result.issues;
+        this.state.isScanningWorkspace = false;
+        this.refreshWorkspaceData();
+        this.render();
+      });
+    }
+
     // Handle messages coming from the webview
-    this.panel.webview.onDidReceiveMessage(
+    this.webview.onDidReceiveMessage(
       async (message) => {
         switch (message.command) {
           case 'switch-mode':
@@ -844,7 +901,7 @@ export class BugifyPanel {
   }
 
   public render(): void {
-    this.panel.webview.html = this.getHtmlForWebview();
+    this.webview.html = this.getHtmlForWebview();
   }
 
   private escapeHtml(str: string | null | undefined): string {
@@ -870,10 +927,10 @@ export class BugifyPanel {
 
   private getHtmlForWebview(): string {
     const nonce = crypto.randomBytes(16).toString('hex');
-    const stylesheetUri = this.panel.webview.asWebviewUri(
+    const stylesheetUri = this.webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'bugify.css')
     );
-    const logoUri = this.panel.webview.asWebviewUri(
+    const logoUri = this.webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'logo.png')
     );
 
@@ -1342,7 +1399,7 @@ export class BugifyPanel {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.panel.webview.cspSource} 'unsafe-inline'; font-src ${this.panel.webview.cspSource}; img-src ${this.panel.webview.cspSource} https: data:; script-src 'nonce-${nonce}';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${this.webview.cspSource} 'unsafe-inline'; font-src ${this.webview.cspSource}; img-src ${this.webview.cspSource} https: data:; script-src 'nonce-${nonce}';">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Bugify</title>
   <link rel="stylesheet" href="${stylesheetUri}">
@@ -1584,8 +1641,15 @@ export class BugifyPanel {
   }
 
   public dispose(): void {
-    BugifyPanel.currentPanel = undefined;
-    this.panel.dispose();
+    if (BugifyPanel.currentPanel === this) {
+      BugifyPanel.currentPanel = undefined;
+    }
+    if (BugifyPanel.currentSidebarPanel === this) {
+      BugifyPanel.currentSidebarPanel = undefined;
+    }
+    if (this.panel) {
+      this.panel.dispose();
+    }
     while (this.disposables.length) {
       const d = this.disposables.pop();
       if (d) d.dispose();

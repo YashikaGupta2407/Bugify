@@ -5,8 +5,36 @@
  * Ensures fixes are honest: only marks VERIFIED if genuine static verification succeeds.
  */
 
-import * as ts from 'typescript';
+import * as path from 'path';
+import * as fs from 'fs';
 import { BugifyDiagnostic } from '../types/bugify';
+
+let tsModule: any = null;
+
+function getTs(): any {
+  if (tsModule) return tsModule;
+  try {
+    tsModule = require('typescript');
+    return tsModule;
+  } catch {
+    const candidates = [
+      path.resolve(__dirname, '../../vendor/typescript/lib/typescript.js'),
+      path.resolve(__dirname, '../../../vendor/typescript/lib/typescript.js'),
+      path.resolve(__dirname, '../../node_modules/typescript/lib/typescript.js'),
+    ];
+    for (const cand of candidates) {
+      if (fs.existsSync(cand)) {
+        try {
+          tsModule = require(cand);
+          return tsModule;
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+  return null;
+}
 
 export interface FixValidationOutput {
   status: 'validated' | 'generated' | 'needs_context' | 'validation_failed' | 'cannot_fix';
@@ -46,6 +74,16 @@ export function validateProposedFix(params: {
 
   // 3. Static Syntax Validation using TypeScript AST
   try {
+    const ts = getTs();
+    if (!ts) {
+      return {
+        status: 'generated',
+        verificationStatus: 'NOT_VERIFIED',
+        message: 'Candidate fix generated — awaiting live compiler confirmation.',
+        checkerUsed: 'static_guard',
+      };
+    }
+
     const isJs = filePath.endsWith('.js') || filePath.endsWith('.jsx');
     const scriptKind = isJs ? ts.ScriptKind.JSX : ts.ScriptKind.TSX;
 
@@ -101,8 +139,18 @@ export function validateProposedFix(params: {
         };
       }
 
-      if (diagCode === '2532' || diagCode === 'TS2532' || diagCode === '18048') {
+      if (diagCode === '2532' || diagCode === 'TS2532' || diagCode === '18048' || diagCode === '2531' || diagCode === 'TS2531' || diagCode === '2533' || diagCode === 'TS2533') {
         // Optional chaining guard: safe dereferencing
+        // Ensure that the guarded access does not falsely verify logger prefixes like console?.log
+        if (correctedCode.includes('console?.') && !originalCode.includes('console?.')) {
+          return {
+            status: 'validation_failed',
+            verificationStatus: 'NOT_VERIFIED',
+            message: 'Fix guarded logger (console) rather than the problematic property dereference.',
+            checkerUsed: 'ts_ast_parser',
+          };
+        }
+
         if (correctedCode.includes('?.') || correctedCode.includes('if (')) {
           return {
             status: 'validated',

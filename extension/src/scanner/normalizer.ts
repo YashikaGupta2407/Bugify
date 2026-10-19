@@ -89,7 +89,8 @@ export function normalizeAndDeduplicateIssues(rawIssues: BugifyIssue[]): BugifyI
     const primaryKey = `${relPath.toLowerCase()}:${line}:${col}:${normCode}`;
 
     // Line-level semantic key for cross-tool collisions (e.g., VS Code vs tsc where column may vary by 1-2 chars)
-    const lineKey = `${relPath.toLowerCase()}:${line}:${normCode || normMsg.slice(0, 30)}`;
+    // Combines normCode and message prefix so distinct errors on the same line do not collide
+    const lineKey = `${relPath.toLowerCase()}:${line}:${normCode}:${normMsg.slice(0, 40)}`;
 
     const existing = dedupedMap.get(primaryKey) || dedupedMap.get(lineKey);
 

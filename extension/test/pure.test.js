@@ -819,3 +819,227 @@ describe('Project Capability Detection', () => {
   });
 });
 
+describe('Regression Tests: JavaScript Scanner & Fix Targeting Accuracy', () => {
+  const { buildLocalAnalysis } = require('../out/diagnostics/localAnalysis');
+  const { validateProposedFix } = require('../out/diagnostics/fixValidator');
+  const { normalizeAndDeduplicateIssues } = require('../out/scanner/normalizer');
+  const { parseTscOutput } = require('../out/scanner/parsers/tscParser');
+  const { filterPlainJsFalsePositives } = require('../out/scanner/analyzers/tscAnalyzer');
+
+  test('Regression 1: Undefined property access guards target variable, not logger console.log', () => {
+    const diag = {
+      severity: 'error',
+      message: "Object is possibly 'undefined'.",
+      source: 'ts',
+      code: '2532',
+      startLine: 4,
+      startColumn: 13,
+      endLine: 4,
+      endColumn: 22,
+    };
+
+    const res = buildLocalAnalysis(
+      diag,
+      'test-fixtures/js-undefined.js',
+      'console.log(user.name);',
+      'const user = undefined;\nconsole.log(user.name);'
+    );
+
+    assert.strictEqual(res.errorType, 'TypeError');
+    assert.strictEqual(res.correctedCode, 'console.log(user?.name);');
+    assert.ok(!res.correctedCode.includes('console?.log'), 'Must not alter console.log into console?.log');
+    assert.ok(res.changes[0].before === 'user.name' || res.changes[0].after === 'user?.name');
+  });
+
+  test('Regression 2: Fix validator rejects improper fixes guarding console?.log', () => {
+    const rejected = validateProposedFix({
+      filePath: 'app.js',
+      fileContent: 'console.log(user.name);\n',
+      originalCode: 'console.log',
+      correctedCode: 'console?.log(user.name);',
+      diagnostic: {
+        severity: 'error',
+        message: "Object is possibly 'undefined'.",
+        code: '2532',
+      },
+    });
+
+    assert.strictEqual(rejected.verificationStatus, 'NOT_VERIFIED');
+    assert.strictEqual(rejected.status, 'validation_failed');
+    assert.ok(rejected.message.includes('console'));
+  });
+
+  test('Regression 3: Normalizer preserves distinct errors on the same line', () => {
+    const issues = [
+      {
+        id: 'tsc-calc.js:2:10:TS2304',
+        filePath: 'src/calc.js',
+        line: 2,
+        column: 10,
+        severity: 'error',
+        message: "Cannot find name 'missingVarA'.",
+        source: 'typescript',
+        code: 'TS2304',
+        analyzer: 'tsc',
+      },
+      {
+        id: 'tsc-calc.js:2:25:TS2304',
+        filePath: 'src/calc.js',
+        line: 2,
+        column: 25,
+        severity: 'error',
+        message: "Cannot find name 'missingVarB'.",
+        source: 'typescript',
+        code: 'TS2304',
+        analyzer: 'tsc',
+      },
+    ];
+
+    const deduped = normalizeAndDeduplicateIssues(issues);
+    assert.strictEqual(deduped.length, 2, 'Both distinct undefined variables must be preserved');
+    assert.ok(deduped.some((i) => i.message.includes('missingVarA')));
+    assert.ok(deduped.some((i) => i.message.includes('missingVarB')));
+  });
+
+  test('Regression 4: tscParser maps CommonJS migration hints (TS80001) to info severity', () => {
+    const output = 'src/index.js(1,1): info TS80001: File is a CommonJS module; it may be converted to an ES module.';
+    const issues = parseTscOutput(output, '/workspace');
+
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].code, 'TS80001');
+    assert.strictEqual(issues[0].severity, 'info');
+  });
+
+  test('Regression 5: filterPlainJsFalsePositives removes false positive TS2307 on Node built-ins in .js files', () => {
+    const issues = [
+      {
+        id: '1',
+        filePath: 'src/server.js',
+        line: 1,
+        column: 1,
+        severity: 'error',
+        message: "Cannot find module 'path' or its corresponding type declarations.",
+        code: 'TS2307',
+        analyzer: 'tsc',
+      },
+      {
+        id: '2',
+        filePath: 'src/server.js',
+        line: 2,
+        column: 1,
+        severity: 'error',
+        message: "Cannot find module 'fs' or its corresponding type declarations.",
+        code: 'TS2307',
+        analyzer: 'tsc',
+      },
+      {
+        id: '3',
+        filePath: 'src/server.js',
+        line: 3,
+        column: 1,
+        severity: 'error',
+        message: "Cannot find module './missingFile' or its corresponding type declarations.",
+        code: 'TS2307',
+        analyzer: 'tsc',
+      },
+      {
+        id: '4',
+        filePath: 'src/app.ts',
+        line: 1,
+        column: 1,
+        severity: 'error',
+        message: "Cannot find module 'path' or its corresponding type declarations.",
+        code: 'TS2307',
+        analyzer: 'tsc',
+      },
+    ];
+
+    const filtered = filterPlainJsFalsePositives(issues, '/workspace');
+
+    // Node built-in imports in JS must be filtered out
+    assert.strictEqual(filtered.some((i) => i.message.includes("'path'") && i.filePath.endsWith('.js')), false);
+    assert.strictEqual(filtered.some((i) => i.message.includes("'fs'") && i.filePath.endsWith('.js')), false);
+
+    // Truly missing relative import in JS must be preserved
+    assert.strictEqual(filtered.some((i) => i.message.includes("'./missingFile'")), true);
+
+    // TypeScript files (.ts) missing declarations must be preserved
+    assert.strictEqual(filtered.some((i) => i.filePath === 'src/app.ts'), true);
+  });
+});
+
+describe('UI Placement & Activity Bar View Registration Verification', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const Module = require('module');
+
+  // Provide mock for vscode module if running in pure node test environment
+  if (!Module._cache['vscode']) {
+    const origResolve = Module._resolveFilename;
+    Module._resolveFilename = function (request, parent, isMain, options) {
+      if (request === 'vscode') return 'vscode';
+      return origResolve.call(this, request, parent, isMain, options);
+    };
+    Module._cache['vscode'] = {
+      id: 'vscode',
+      filename: 'vscode',
+      loaded: true,
+      exports: {
+        ViewColumn: { Beside: 2, One: 1 },
+        window: { registerWebviewViewProvider: () => ({ dispose: () => {} }) },
+        Uri: { joinPath: () => ({}) },
+        Range: class {},
+        Position: class {},
+        Selection: class {},
+        TextEditorRevealType: { InCenter: 2 },
+      },
+    };
+  }
+
+  const { BugifySidebarViewProvider } = require('../out/ui/sidebarProvider');
+
+  const pkgJsonPath = path.join(__dirname, '..', 'package.json');
+  const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+
+  test('1. package.json registers an activitybar container with valid icon', () => {
+    assert.ok(pkg.contributes?.viewsContainers?.activitybar, 'Must declare contributes.viewsContainers.activitybar');
+    const container = pkg.contributes.viewsContainers.activitybar[0];
+    assert.strictEqual(container.id, 'bugify-activitybar');
+    assert.strictEqual(container.title, 'Bugify');
+    assert.strictEqual(container.icon, 'media/bugify-icon.svg');
+
+    // Verify icon file exists on disk
+    const iconPath = path.join(__dirname, '..', container.icon);
+    assert.ok(fs.existsSync(iconPath), `Icon file must exist: ${iconPath}`);
+    const iconContent = fs.readFileSync(iconPath, 'utf8');
+    assert.ok(iconContent.includes('<svg') && iconContent.includes('</svg>'), 'Icon must be valid SVG');
+  });
+
+  test('2. package.json registers webview view in matching container with matching ID', () => {
+    const containerId = pkg.contributes.viewsContainers.activitybar[0].id;
+    assert.ok(pkg.contributes?.views?.[containerId], `views must have entry for container ${containerId}`);
+    const view = pkg.contributes.views[containerId][0];
+    assert.strictEqual(view.type, 'webview');
+    assert.strictEqual(view.id, 'bugify.sidebarView');
+    assert.strictEqual(view.name, 'Bugify');
+  });
+
+  test('3. activationEvents contains onView matching the view ID', () => {
+    const viewId = pkg.contributes.views['bugify-activitybar'][0].id;
+    assert.ok(
+      pkg.activationEvents.includes(`onView:${viewId}`),
+      `activationEvents must include 'onView:${viewId}'`
+    );
+  });
+
+  test('4. BugifySidebarViewProvider.viewType matches package.json view ID', () => {
+    const viewId = pkg.contributes.views['bugify-activitybar'][0].id;
+    assert.strictEqual(
+      BugifySidebarViewProvider.viewType,
+      viewId,
+      'BugifySidebarViewProvider.viewType must match package.json registered view ID'
+    );
+  });
+});
+
+

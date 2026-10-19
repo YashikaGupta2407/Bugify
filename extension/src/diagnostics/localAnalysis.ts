@@ -281,30 +281,99 @@ export function buildLocalAnalysis(
   // -----------------------------------------------------------------
   // 4. Undefined / Null Property Access (e.g. 2532, 18048)
   // -----------------------------------------------------------------
-  if (code === '2532' || code === 'TS2532' || code === '18048' || code === 'TS18048' || msg.includes('undefined') || msg.includes('null') || msg.includes('cannot read property')) {
+  const isNullUndefinedCategory = category === 'NULL / UNDEFINED';
+  const isNullUndefinedCode =
+    code === '2532' || code === 'TS2532' ||
+    code === '2531' || code === 'TS2531' ||
+    code === '2533' || code === 'TS2533' ||
+    code === '18048' || code === 'TS18048' ||
+    code === '18047' || code === 'TS18047';
+  const isNullUndefinedMessage =
+    msg.includes("possibly 'undefined'") ||
+    msg.includes("possibly 'null'") ||
+    msg.includes('cannot read property') ||
+    msg.includes('cannot read properties');
+
+  if (isNullUndefinedCategory || isNullUndefinedCode || isNullUndefinedMessage) {
     let originalCode = trimmedLine;
     let correctedCode: string | null = null;
     let changes: CodeChange[] = [];
 
     // Dynamically look for property access (e.g. obj.prop) in the line
     if (trimmedLine) {
-      // Find property access to guard with optional chaining
-      const propAccessMatch = trimmedLine.match(/([a-zA-Z0-9_$]+)\.([a-zA-Z0-9_$]+)/);
-      if (propAccessMatch) {
-        const fullExpr = propAccessMatch[0];
-        const objName = propAccessMatch[1];
-        const propName = propAccessMatch[2];
-        const safeExpr = `${objName}?.${propName}`;
+      // Find all property access expressions in the line
+      const allMatches: Array<{ fullExpr: string; objName: string; propName: string; index: number }> = [];
+      const regex = /([a-zA-Z0-9_$]+)\.([a-zA-Z0-9_$]+)/g;
+      let m: RegExpExecArray | null;
+      while ((m = regex.exec(trimmedLine)) !== null) {
+        allMatches.push({
+          fullExpr: m[0],
+          objName: m[1],
+          propName: m[2],
+          index: m.index,
+        });
+      }
 
-        correctedCode = trimmedLine.replace(fullExpr, safeExpr);
-        changes = [
-          {
-            line,
-            before: fullExpr,
-            after: safeExpr,
-            reason: 'Use optional chaining to safely guard against null/undefined.',
-          },
-        ];
+      if (allMatches.length > 0) {
+        // Exclude well-known loggers or global namespaces from being falsely targeted as null/undefined
+        const WELL_KNOWN_GLOBALS = new Set(['console', 'Math', 'JSON', 'Object', 'Array', 'Promise', 'process', 'window', 'document']);
+
+        // Check if diagnostic message explicitly names the target identifier:
+        // E.g. "'user' is possibly 'undefined'" or "Cannot read properties of undefined (reading 'name')"
+        const identMatch = msg.match(/['"]([a-zA-Z0-9_$]+)['"]\s+is possibly/i);
+        const targetIdent = identMatch ? identMatch[1] : undefined;
+
+        // Diagnostic startColumn relative to trimmedLine (1-based to trimmed index)
+        let targetColOffset = -1;
+        if (diagnostic.startColumn) {
+          const lineTextRef = lineText || trimmedLine;
+          const leadingWhitespaceLen = (lineTextRef.match(/^\s*/)?.[0] || '').length;
+          targetColOffset = (diagnostic.startColumn - 1) - leadingWhitespaceLen;
+        }
+
+        let bestMatch = allMatches[0];
+        let bestScore = -100;
+
+        for (const candidate of allMatches) {
+          let score = 10;
+          if (WELL_KNOWN_GLOBALS.has(candidate.objName)) {
+            score -= 30; // Strongly penalize console.log, Math.max, etc.
+          }
+          if (targetIdent && candidate.objName === targetIdent) {
+            score += 50; // Exact match on identified variable name
+          }
+          if (targetColOffset >= 0) {
+            const dist = Math.abs(candidate.index - targetColOffset);
+            if (dist <= candidate.fullExpr.length + 2) {
+              score += 40; // Very close to diagnostic position
+            } else {
+              score -= Math.min(dist, 20);
+            }
+          }
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = candidate;
+          }
+        }
+
+        // Only guard if the best match is not an unflagged global logger
+        if (bestScore > -15) {
+          const fullExpr = bestMatch.fullExpr;
+          const objName = bestMatch.objName;
+          const propName = bestMatch.propName;
+          const safeExpr = `${objName}?.${propName}`;
+
+          correctedCode = trimmedLine.replace(fullExpr, safeExpr);
+          changes = [
+            {
+              line,
+              before: fullExpr,
+              after: safeExpr,
+              reason: `Use optional chaining to safely guard '${objName}' against null/undefined.`,
+            },
+          ];
+        }
       }
     }
 

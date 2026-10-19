@@ -6,12 +6,84 @@
 
 import { spawn } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 import { BugifyIssue, AnalyzerStatus, CancellationToken } from '../types';
 import { parseTscOutput } from '../parsers/tscParser';
 import { resolveTscExecutable, getAugmentedEnv } from '../envUtils';
 import { logger } from '../../logger';
 
 const TIMEOUT_MS = 30000;
+
+const NODE_BUILTIN_MODULES = new Set([
+  'assert', 'async_hooks', 'buffer', 'child_process', 'cluster', 'console',
+  'constants', 'crypto', 'dgram', 'diagnostics_channel', 'dns', 'domain',
+  'events', 'fs', 'fs/promises', 'http', 'http2', 'https', 'inspector',
+  'module', 'net', 'os', 'path', 'path/posix', 'path/win32', 'perf_hooks',
+  'process', 'punycode', 'querystring', 'readline', 'repl', 'stream',
+  'stream/promises', 'stream/consumers', 'stream/web', 'string_decoder',
+  'test', 'timers', 'timers/promises', 'tls', 'trace_events', 'tty',
+  'url', 'util', 'util/types', 'v8', 'vm', 'wasi', 'worker_threads', 'zlib',
+]);
+
+/**
+ * Filters out false-positive TypeScript errors when checking untyped JavaScript files
+ * (e.g. built-in Node modules and npm dependencies missing TS type declarations).
+ */
+export function filterPlainJsFalsePositives(issues: BugifyIssue[], workspaceRoot: string): BugifyIssue[] {
+  let pkgDeps: Set<string> | null = null;
+
+  return issues.filter((issue) => {
+    const isJs = issue.filePath.endsWith('.js') || issue.filePath.endsWith('.jsx');
+    if (!isJs) return true;
+
+    // Filter missing type declaration warnings on valid JS imports
+    if (issue.code === 'TS2307') {
+      const match = issue.message.match(/Cannot find module '([^']+)'/);
+      if (match) {
+        const mod = match[1];
+        // 1. Built-in Node modules are always valid at runtime in Node.js
+        if (NODE_BUILTIN_MODULES.has(mod) || mod.startsWith('node:')) {
+          return false;
+        }
+        // 2. Installed packages in package.json or node_modules
+        if (!mod.startsWith('.') && !mod.startsWith('/')) {
+          if (pkgDeps === null) {
+            pkgDeps = new Set();
+            try {
+              const pkgJsonPath = path.join(workspaceRoot, 'package.json');
+              if (fs.existsSync(pkgJsonPath)) {
+                const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
+                const combined = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies };
+                for (const k of Object.keys(combined)) {
+                  pkgDeps.add(k);
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          const basePkg = mod.startsWith('@') ? mod.split('/').slice(0, 2).join('/') : mod.split('/')[0];
+          if (pkgDeps.has(basePkg) || fs.existsSync(path.join(workspaceRoot, 'node_modules', basePkg))) {
+            return false; // Installed package; only missing TS declarations in plain JS
+          }
+        }
+      }
+    }
+
+    // TS80001: CommonJS module hint - informational suggestion only
+    if (issue.code === 'TS80001' || issue.code === '80001') {
+      issue.severity = 'info';
+    }
+
+    // TS7006: Parameter implicitly has an 'any' type in untyped JS
+    if (issue.code === 'TS7006' || issue.code === 'TS7031') {
+      issue.severity = 'info';
+    }
+
+    return true;
+  });
+}
 
 export interface TscAnalyzerResult {
   issues: BugifyIssue[];
@@ -212,7 +284,8 @@ function executeSingleTsc(
 
       // Note: tsc exits with code 2 or 1 when type errors are found. This is expected.
       const parsedIssues = parseTscOutput(stdout + '\n' + stderr, workspaceRoot);
-      resolve(parsedIssues);
+      const filteredIssues = filterPlainJsFalsePositives(parsedIssues, workspaceRoot);
+      resolve(filteredIssues);
     });
   });
 }
@@ -291,7 +364,8 @@ function executeTscOnFiles(
       if (timedOut) return;
 
       const parsedIssues = parseTscOutput(stdout + '\n' + stderr, workspaceRoot);
-      resolve(parsedIssues);
+      const filteredIssues = filterPlainJsFalsePositives(parsedIssues, workspaceRoot);
+      resolve(filteredIssues);
     });
   });
 }
