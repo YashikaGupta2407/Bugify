@@ -28,7 +28,30 @@ Rules:
   "suggestion": "Specific, actionable guidance on what the developer should check or change.",
   "correctedCode": "The corrected version of the code snippet that fixes the bug while preserving the user's logic."
 }`;
+const AI_TIMEOUT_MS = 15000;
 
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, AI_TIMEOUT_MS);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`AI request timed out after ${AI_TIMEOUT_MS} ms`);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 /**
  * Builds a heuristic mentor explanation when external LLM is not configured or fails.
  */
@@ -163,14 +186,17 @@ print(divide(10, 0))`;
 /**
  * Calls Google Gemini API to generate structured explanation.
  */
-async function callGeminiApi({ apiKey, model, userContent }) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
+// async function callGeminiApi({ apiKey, model, userContent }) {
+//   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+async function callGeminiApi({
+  apiKey, model, userContent, systemPrompt = SYSTEM_PROMPT
+}) {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   const requestBody = {
     contents: [
       {
         parts: [
-          { text: `${SYSTEM_PROMPT}\n\n${userContent}` }
+          { text: `${systemPrompt}\n\n${userContent}` }
         ]
       }
     ],
@@ -180,9 +206,9 @@ async function callGeminiApi({ apiKey, model, userContent }) {
     }
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json','x-goog-api-key': apiKey,},
     body: JSON.stringify(requestBody),
   });
 
@@ -197,26 +223,26 @@ async function callGeminiApi({ apiKey, model, userContent }) {
     throw new Error('Gemini API returned an empty response.');
   }
 
-  return JSON.parse(rawText);
+  return cleanAndParseJson(rawText);
 }
 
 /**
  * Calls OpenAI-compatible API to generate structured explanation.
  */
-async function callOpenAiApi({ apiKey, model, baseUrl, userContent }) {
+async function callOpenAiApi({ apiKey, model, baseUrl, userContent,systemPrompt = SYSTEM_PROMPT,}) {
   const endpoint = `${baseUrl || 'https://api.openai.com/v1'}/chat/completions`;
 
   const requestBody = {
     model: model || 'gpt-4o-mini',
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt},
       { role: 'user', content: userContent },
     ],
     response_format: { type: 'json_object' },
     temperature: 0.2,
   };
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithTimeout(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -729,31 +755,16 @@ Return ONLY valid JSON matching this schema:
           model,
           baseUrl: process.env.AI_BASE_URL,
           userContent: extensionPrompt,
+          systemPrompt: DEBUGGER_SYSTEM_PROMPT,
         });
       } else {
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
-              { parts: [{ text: `${DEBUGGER_SYSTEM_PROMPT}\n\n${extensionPrompt}` }] }
-            ],
-            generationConfig: {
-              responseMimeType: 'application/json',
-              temperature: 0.1,
-            }
-          }),
+        rawResult = await callGeminiApi({
+          apiKey,
+          model,
+          userContent: extensionPrompt,
+          systemPrompt: DEBUGGER_SYSTEM_PROMPT,
         });
-
-        if (!response.ok) {
-          throw new Error(`Gemini API error: ${response.status}`);
-        }
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        rawResult = cleanAndParseJson(text);
       }
-
       if (rawResult && rawResult.summary && (rawResult.rootCause || rawResult.cause)) {
         const correctedCode = rawResult.correctedCode ? String(rawResult.correctedCode) : null;
         const originalCode = rawResult.originalCode ? String(rawResult.originalCode) : '';
