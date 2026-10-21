@@ -264,7 +264,49 @@ async function callOpenAiApi({ apiKey, model, baseUrl, userContent,systemPrompt 
 
   return JSON.parse(rawContent);
 }
+/**
+ * Calls a local Ollama model to generate a structured explanation.
+ */
+async function callOllamaApi({
+  model,
+  userContent,
+  systemPrompt = SYSTEM_PROMPT,
+}) {
+  const endpoint = `${process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'}/api/chat`;
 
+  const response = await fetchWithTimeout(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: model || 'qwen2.5-coder:3b',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
+      ],
+      stream: false,
+      format: 'json',
+      options: {
+        temperature: 0.2,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Ollama API error (${response.status}): ${errorText}`);
+  }
+
+  const data = await response.json();
+  const rawContent = data.message?.content;
+
+  if (!rawContent) {
+    throw new Error('Ollama returned an empty response.');
+  }
+
+  return cleanAndParseJson(rawContent);
+}
 /**
  * Main service entry point for generating bug explanations.
  * 
@@ -665,12 +707,26 @@ async function explainExtensionDiagnostic({
   const endCol = primaryDiag?.endColumn || 20;
   const lang = language || file?.language || 'plaintext';
 
+  // const apiKey = process.env.AI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
+  // const provider = (process.env.AI_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : 'gemini')).toLowerCase();
+  // const model = process.env.AI_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'gemini-1.5-flash');
   const apiKey = process.env.AI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
-  const provider = (process.env.AI_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : 'gemini')).toLowerCase();
-  const model = process.env.AI_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'gemini-1.5-flash');
 
-  // If no AI key configured, use deterministic rule-based analysis directly
-  if (!apiKey) {
+  const provider = (
+    process.env.AI_PROVIDER ||
+    (process.env.OPENAI_API_KEY ? 'openai' : 'gemini')
+  ).toLowerCase();
+
+  const model =
+    process.env.AI_MODEL ||
+    (provider === 'openai'
+      ? 'gpt-4o-mini'
+      : provider === 'ollama'
+        ? 'qwen2.5-coder:3b'
+        : 'gemini-1.5-flash');
+
+  // Ollama runs locally and does not require an API key.
+  if (!apiKey && provider !== 'ollama') {
     return buildRuleBasedAnalysis({
       mode,
       detail,
@@ -749,7 +805,13 @@ Return ONLY valid JSON matching this schema:
     attempts++;
     try {
       let rawResult;
-      if (provider === 'openai') {
+      if (provider === 'ollama') {
+        rawResult = await callOllamaApi({
+          model,
+          userContent: extensionPrompt,
+          systemPrompt: DEBUGGER_SYSTEM_PROMPT,
+        });
+      } else if (provider === 'openai') {
         rawResult = await callOpenAiApi({
           apiKey,
           model,
