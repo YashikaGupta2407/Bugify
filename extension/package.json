@@ -94,7 +94,7 @@
       "properties": {
         "bugify.backendUrl": {
           "type": "string",
-          "default": "http://localhost:5000",
+          "default": "http://localhost:5001",
           "description": "Base URL of the Bugify backend server"
         },
         "bugify.contextLines": {
