@@ -89,32 +89,9 @@ export function validateProposedFix(params: {
         };
       }
 
-      // Check whether diagnostic was specifically targeted and resolved
-      const diagCode = diagnostic?.code ? String(diagnostic.code) : '';
-      if (diagCode === '2322' || diagCode === 'TS2322') {
-        // Type mismatch: if type annotation or assigned value was adjusted and syntax is clean
-        return {
-          status: 'validated',
-          verificationStatus: 'VERIFIED',
-          message: 'Statically verified — syntax and type annotation contract valid.',
-          checkerUsed: 'ts_ast_parser',
-        };
-      }
-
-      if (diagCode === '2532' || diagCode === 'TS2532' || diagCode === '18048') {
-        // Optional chaining guard: safe dereferencing
-        if (correctedCode.includes('?.') || correctedCode.includes('if (')) {
-          return {
-            status: 'validated',
-            verificationStatus: 'VERIFIED',
-            message: 'Statically verified — guarded access prevents null/undefined crash.',
-            checkerUsed: 'ts_ast_parser',
-          };
-        }
-      }
     }
 
-    // If snippet is syntactically sound but full compiler re-check was not completed
+    // If syntax is valid but the compiler has not verified the fix
     return {
       status: 'generated',
       verificationStatus: 'NOT_VERIFIED',
