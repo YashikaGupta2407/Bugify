@@ -162,7 +162,7 @@ export function validateProposedFix(params: {
       }
     }
 
-    // If snippet is syntactically sound but full compiler re-check was not completed
+    // If syntax is valid but the compiler has not verified the fix
     return {
       status: 'generated',
       verificationStatus: 'NOT_VERIFIED',
