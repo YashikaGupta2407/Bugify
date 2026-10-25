@@ -29,3 +29,7 @@ Thumbs.db
 
 # Database volumes
 pgdata/
+
+# Python cache
+__pycache__/
+*.py[cod]
