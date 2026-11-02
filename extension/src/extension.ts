@@ -8,6 +8,7 @@ import { DiagnosticCollector } from './diagnostics/diagnosticCollector';
 import { WorkspaceScanner } from './scanner/workspaceScanner';
 import { BugifyApiClient } from './api/bugifyApi';
 import { BugifyPanel } from './ui/bugifyPanel';
+import { BugifySidebarViewProvider } from './ui/sidebarProvider';
 import { BugifyStatusBar } from './ui/statusBar';
 import { BugifyCodeActionProvider } from './ui/codeActions';
 import {
@@ -25,6 +26,24 @@ export function activate(context: vscode.ExtensionContext): void {
   const workspaceScanner = new WorkspaceScanner(context);
   const apiClient = new BugifyApiClient();
   const statusBar = new BugifyStatusBar(context, diagnosticCollector, workspaceScanner);
+
+  // Register Sidebar Webview View Provider (Activity Bar)
+  const sidebarProvider = new BugifySidebarViewProvider(
+    context.extensionUri,
+    apiClient,
+    diagnosticCollector,
+    workspaceScanner
+  );
+  const sidebarDisposable = vscode.window.registerWebviewViewProvider(
+    BugifySidebarViewProvider.viewType,
+    sidebarProvider,
+    {
+      webviewOptions: {
+        retainContextWhenHidden: true,
+      },
+    }
+  );
+  context.subscriptions.push(sidebarDisposable);
 
   // Register CodeAction Provider ("Debug with Bugify" lightbulb / Ctrl+.)
   const codeActionDisposable = vscode.languages.registerCodeActionsProvider(
@@ -77,6 +96,11 @@ export function activate(context: vscode.ExtensionContext): void {
   // Command 1: bugify.openWorkspace (Primary workspace overview action)
   const openWorkspaceCommand = vscode.commands.registerCommand('bugify.openWorkspace', async () => {
     logger.log('[Bugify] Open workspace command triggered');
+    try {
+      await vscode.commands.executeCommand('bugify.sidebarView.focus');
+    } catch {
+      // fallback if sidebar view is not active
+    }
     const panel = BugifyPanel.createOrShow(
       context.extensionUri,
       apiClient,
@@ -204,5 +228,8 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
   if (BugifyPanel.currentPanel) {
     BugifyPanel.currentPanel.dispose();
+  }
+  if (BugifyPanel.currentSidebarPanel) {
+    BugifyPanel.currentSidebarPanel.dispose();
   }
 }

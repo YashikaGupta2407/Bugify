@@ -58,8 +58,13 @@ export function parseTscOutput(rawOutput: string, workspaceRoot: string): Bugify
       }
       relPath = relPath.replace(/\\/g, '/');
 
-      const severity: 'error' | 'warning' | 'info' =
+      let severity: 'error' | 'warning' | 'info' =
         rawSev === 'error' ? 'error' : rawSev === 'warning' ? 'warning' : 'info';
+
+      // Informational suggestions or migration hints must not be flagged as fatal errors
+      if (code === 'TS80001' || code === '80001') {
+        severity = 'info';
+      }
 
       currentIssue = {
         id: `tsc-${relPath}:${lineNum}:${colNum}:${code}`,

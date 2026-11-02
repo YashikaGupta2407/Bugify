@@ -30,9 +30,28 @@
     "onStartupFinished",
     "onLanguage:typescript",
     "onLanguage:javascript",
-    "onLanguage:python"
+    "onLanguage:python",
+    "onView:bugify.sidebarView"
   ],
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "bugify-activitybar",
+          "title": "Bugify",
+          "icon": "media/bugify-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "bugify-activitybar": [
+        {
+          "type": "webview",
+          "id": "bugify.sidebarView",
+          "name": "Bugify"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "bugify.openWorkspace",
@@ -95,6 +114,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "test": "npm run compile && node --test test/pure.test.js test/workspaceScan.integration.test.js test/closedFileScan.acceptance.test.js test/realWorldDebugging.acceptance.test.js test/fixValidator.test.js test/localAnalysis.test.js test/patchPlanner.test.js test/cacheKey.test.js",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node --test test/pure.test.js test/workspaceScan.integration.test.js test/closedFileScan.acceptance.test.js test/realWorldDebugging.acceptance.test.js",
     "package": "npx @vscode/vsce package --no-dependencies --allow-missing-repository",
     "host": "npm run compile && \"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/test-fixtures\"",
     "host:antigravity": "npm run compile && \"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/test-fixtures\""
