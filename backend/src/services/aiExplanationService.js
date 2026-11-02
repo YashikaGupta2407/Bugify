@@ -457,6 +457,7 @@ function buildRuleBasedAnalysis({
   diagnostics = [],
   errorType,
   codeContext = '',
+  contextStartLine,
   functionContext,
   imports,
   dependencies,
@@ -471,13 +472,17 @@ function buildRuleBasedAnalysis({
   const diagMsg = primaryDiag?.message || 'Code inspection requested';
   const filePath = file?.path || 'unknown';
 
-  // Extract relevant original code line from codeContext if available
+  // Extract relevant original code line from codeContext if available.
+  // codeContext is a window starting at contextStartLine, so the target line
+  // must be indexed relative to that window rather than from line 1.
   const contextLines = (codeContext || '').split(/\r?\n/);
-  let relevantLine = '';
-  if (contextLines.length > 0) {
-    const errorLineIdx = targetLine > 0 && targetLine <= contextLines.length ? targetLine - 1 : 0;
-    relevantLine = contextLines[errorLineIdx]?.trim() || contextLines[0]?.trim() || '';
-  }
+  const windowStartLine =
+    Number.isInteger(contextStartLine) && contextStartLine > 0 ? contextStartLine : 1;
+  const targetLineIdx = targetLine - windowStartLine;
+  const relevantLine =
+    targetLineIdx >= 0 && targetLineIdx < contextLines.length
+      ? (contextLines[targetLineIdx] || '').trim()
+      : '';
 
   let status = 'fixed';
   let title = `Issue at line ${targetLine}`;
@@ -690,6 +695,8 @@ async function explainExtensionDiagnostic({
   cursor,
   selection,
   codeContext,
+  contextStartLine,
+  contextEndLine,
   functionContext,
   imports,
   dependencies,
@@ -712,6 +719,8 @@ async function explainExtensionDiagnostic({
   const endLine = primaryDiag?.endLine || targetLine;
   const endCol = primaryDiag?.endColumn || 20;
   const lang = language || file?.language || 'plaintext';
+  const windowStartLine =
+    Number.isInteger(contextStartLine) && contextStartLine > 0 ? contextStartLine : 1;
 
   // const apiKey = process.env.AI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
   // const provider = (process.env.AI_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : 'gemini')).toLowerCase();
@@ -741,6 +750,7 @@ async function explainExtensionDiagnostic({
       diagnostics,
       errorType,
       codeContext: safeCodeContext,
+      contextStartLine,
       functionContext: safeFunctionContext,
       imports: safeImports,
       dependencies,
@@ -748,6 +758,18 @@ async function explainExtensionDiagnostic({
       language: lang,
     });
   }
+
+  // Number the window lines with their real file line numbers so the model
+  // can address the diagnostic precisely instead of guessing an index.
+  const contextWindowLines = safeCodeContext.split(/\r?\n/);
+  const numberedContext = contextWindowLines
+    .map((line, index) => `${windowStartLine + index} | ${line}`)
+    .join('\n');
+  const targetLineIdx = targetLine - windowStartLine;
+  const targetLineText =
+    targetLineIdx >= 0 && targetLineIdx < contextWindowLines.length
+      ? contextWindowLines[targetLineIdx]
+      : '';
 
   const extensionPrompt = `You are Bugify, a software debugging assistant.
 Diagnose the actual root cause of this error and propose the exact code fix.
@@ -763,9 +785,13 @@ Severity: ${severity}
 
 ${safeImports ? `Relevant File Imports:\n\`\`\`${lang}\n${safeImports}\n\`\`\`\n` : ''}
 ${safeFunctionContext ? `Enclosing Function Context:\n\`\`\`${lang}\n${safeFunctionContext}\n\`\`\`\n` : ''}
-Active Code Window (Surrounding Lines):
+Numbered Code Window (left number is the real file line number):
 \`\`\`${lang}
-${safeCodeContext}
+${numberedContext}
+\`\`\`
+Diagnostic Line (verbatim from line ${targetLine}):
+\`\`\`${lang}
+${targetLineText}
 \`\`\`
 ${safeSelection ? `User Selection:\n\`\`\`${lang}\n${safeSelection}\n\`\`\`\n` : ''}
 ${dependencies ? `Workspace Dependencies:\n${JSON.stringify(dependencies, null, 2)}\n` : ''}
@@ -776,6 +802,12 @@ Determine:
 3. What exact code should be changed?
 4. What should the corrected code be? (Do NOT use simplistic workarounds like 'as any', '@ts-ignore', 'eslint-disable')
 5. If the context is ambiguous or insufficient to safely fix, set "status": "needs_context".
+
+Patch rules:
+- Every "line" value MUST be an absolute file line number from the numbered window.
+- "before" MUST be copied verbatim from that line so the client can locate it.
+- Only change what the diagnostic requires; do not rewrite unrelated lines.
+- If you cannot copy the exact "before" text, set "status": "needs_context".
 
 Return ONLY valid JSON matching this schema:
 {
@@ -889,6 +921,7 @@ Return ONLY valid JSON matching this schema:
     diagnostics,
     errorType,
     codeContext: safeCodeContext,
+    contextStartLine,
     functionContext: safeFunctionContext,
     imports: safeImports,
     dependencies,

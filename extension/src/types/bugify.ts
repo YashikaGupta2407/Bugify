@@ -61,6 +61,8 @@ export interface AnalyzeRequest {
   };
   selection?: string;
   codeContext: string;
+  contextStartLine?: number;
+  contextEndLine?: number;
   functionContext?: string;
   imports?: string;
   dependencies?: Record<string, string>;

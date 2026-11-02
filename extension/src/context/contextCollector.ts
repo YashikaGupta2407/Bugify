@@ -143,6 +143,8 @@ export async function collectDocumentContext(
     },
     selection: redactedSelection,
     codeContext: redactedCodeContext,
+    contextStartLine: windowResult.startLine,
+    contextEndLine: windowResult.endLine,
     functionContext: redactedFunctionContext,
     imports: redactedImports,
     dependencies,
