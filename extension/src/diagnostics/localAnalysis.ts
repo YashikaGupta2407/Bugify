@@ -8,9 +8,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { BugifyDiagnostic, AnalysisResult, CodeChange } from '../types/bugify';
+import { BugifyDiagnostic, AnalysisResult } from '../types/bugify';
 import { mapDiagnosticSeverity, classifyErrorCategory } from './diagnosticUtils';
-import { validateProposedFix } from './fixValidator';
 
 /**
  * Safely attempts to read the target line of code from disk if available.
@@ -56,7 +55,7 @@ export function buildLocalAnalysis(
   diagnostic: BugifyDiagnostic,
   filePath: string,
   providedLineText?: string,
-  providedFullContent?: string
+  _providedFullContent?: string
 ): AnalysisResult {
   const line = diagnostic.startLine;
   const msg = diagnostic.message || '';
@@ -75,12 +74,10 @@ export function buildLocalAnalysis(
 
   // Attempt to read the actual line of code
   let lineText = providedLineText;
-  let fullContent = providedFullContent;
   if (!lineText) {
     const diskRead = tryReadCodeFromDisk(filePath, line);
     if (diskRead) {
       lineText = diskRead.lineText;
-      fullContent = diskRead.fullContent;
     }
   }
 
@@ -132,36 +129,12 @@ export function buildLocalAnalysis(
     const identMatch = msg.match(/'([^']+)'/);
     const identifier = identMatch ? identMatch[1] : 'identifier';
 
-    let originalCode = trimmedLine;
-    let correctedCode: string | null = null;
-    let changes: CodeChange[] = [];
-
-    if (trimmedLine && trimmedLine.includes(identifier)) {
-      // If parameter or local variable, prefix with underscore to silence warning
-      const prefixed = `_${identifier}`;
-      correctedCode = trimmedLine.replace(new RegExp(`\\b${identifier}\\b`), prefixed);
-      changes = [
-        {
-          line,
-          before: trimmedLine,
-          after: correctedCode,
-          reason: `Prefix unused '${identifier}' with '_' to indicate it is intentionally unreferenced.`,
-        },
-      ];
-    }
-
-    const validation = validateProposedFix({
-      filePath,
-      fileContent: fullContent,
-      originalCode,
-      correctedCode,
-      diagnostic,
-    });
+    const originalCode = trimmedLine;
 
     const isInfo = normSeverity === 'information' || normSeverity === 'hint';
     return {
       analysisSource: 'rules',
-      status: correctedCode ? 'fixed' : 'needs_context',
+      status: 'needs_context',
       errorType: isInfo ? 'TS Information' : 'TS Warning',
       category: 'LINT',
       title: `Unused Identifier '${identifier}'`,
@@ -171,17 +144,21 @@ export function buildLocalAnalysis(
       whyItHappens:
         'Unused variables consume memory and may indicate incomplete implementation or orphaned logic.',
       why: 'The identifier was created but never utilized in any subsequent expression.',
-      recommendedAction: `Remove '${identifier}' or prefix with '_' if required by interface signature.`,
+      recommendedAction: `Remove '${identifier}' or prefix with '_' only if an interface signature requires the parameter.`,
       originalCode,
-      correctedCode,
-      changes,
-      explanation: `'${identifier}' is declared but never read. Either use the variable or prefix with underscore.`,
-      confidence: 0.9,
-      confidenceLevel: 'HIGH',
-      verificationStatus: validation.verificationStatus,
-      validation,
+      correctedCode: null,
+      changes: [],
+      explanation: `'${identifier}' is declared but never read. No automatic rename was applied because prefixing an identifier can break imports, destructuring, or references elsewhere. Remove it, use it, or keep it intentionally unreferenced.`,
+      confidence: 0.6,
+      confidenceLevel: 'MEDIUM',
+      verificationStatus: 'NOT_VERIFIED',
+      validation: {
+        status: 'needs_context',
+        message: `Automated rename withheld: renaming '${identifier}' could affect other references.`,
+        checkerUsed: 'local_rules',
+      },
       cause: `'${identifier}' is declared but its value is never read.`,
-      suggestion: `Remove '${identifier}' or prefix it with an underscore.`,
+      suggestion: `Remove '${identifier}', or prefix it with an underscore only when its signature requires the parameter.`,
       severity: normSeverity,
     };
   }
@@ -190,46 +167,20 @@ export function buildLocalAnalysis(
   // 3. TypeScript Type Mismatch (e.g. 2322, 2345)
   // -----------------------------------------------------------------
   if (code === '2322' || code === 'TS2322' || code === '2345' || code === 'TS2345' || msg.includes('not assignable to type')) {
-    // Dynamically extract assignedType and expectedType from message
     // Format: "Type 'string' is not assignable to type 'number'."
     const typeMatch = msg.match(/Type '([^']+)' is not assignable to type '([^']+)'/i);
     const assignedType = typeMatch ? typeMatch[1] : 'incompatible type';
     const expectedType = typeMatch ? typeMatch[2] : 'declared type';
 
-    // Dynamically extract identifier and assigned value from actual code line
-    // E.g.: "let userId: number = "user_42";"
     let varName = 'the variable';
     let assignedVal = assignedType;
-    let originalCode = trimmedLine;
-    let correctedCode: string | null = null;
-    let changes: CodeChange[] = [];
+    const originalCode = trimmedLine;
 
     const declMatch = trimmedLine.match(/(?:let|const|var)\s+([a-zA-Z0-9_$]+)\s*:\s*([a-zA-Z0-9_$<>\[\]\s]+)\s*=\s*(.+);?/);
     if (declMatch) {
       varName = declMatch[1];
-      const valPart = declMatch[3].replace(/;$/, '').trim();
-      assignedVal = valPart;
-
-      // Update the declared type annotation to match the assigned type
-      correctedCode = trimmedLine.replace(
-        new RegExp(`:\\s*${expectedType}\\b`),
-        `: ${assignedType}`
-      );
-
-      if (correctedCode !== trimmedLine) {
-        changes = [
-          {
-            line,
-            before: trimmedLine,
-            after: correctedCode,
-            reason: `Align variable type annotation with assigned ${assignedType} literal.`,
-          },
-        ];
-      } else {
-        correctedCode = null;
-      }
+      assignedVal = declMatch[3].replace(/;$/, '').trim();
     } else if (trimmedLine) {
-      // General assignment or function return
       const assignMatch = trimmedLine.match(/([a-zA-Z0-9_$]+)\s*=\s*(.+);?/);
       if (assignMatch) {
         varName = assignMatch[1];
@@ -237,24 +188,16 @@ export function buildLocalAnalysis(
       }
     }
 
-    const validation = validateProposedFix({
-      filePath,
-      fileContent: fullContent,
-      originalCode,
-      correctedCode,
-      diagnostic,
-    });
-
     const rootCause = `A value of type '${assignedType}' was assigned to '${varName}', which is typed as '${expectedType}'. ${varName} expects a ${expectedType} but ${assignedVal} is a ${assignedType}.`;
     const cause = `${varName} expects a ${expectedType} but ${assignedVal} is a ${assignedType}. In TypeScript, statically typed variables cannot be assigned values of incompatible types.`;
     const whyItHappens = 'TypeScript enforces compile-time type safety. When a variable declared as one type receives a value of another type, compilation halts.';
     const why = `The type declaration requires '${expectedType}', but the expression evaluates to '${assignedType}'.`;
-    const explanation = `A ${assignedType} value was assigned to a variable that was declared as a ${expectedType}. Updating the type to ${assignedType} matches the assigned ${assignedType} literal while maintaining full type safety.`;
-    const suggestion = `Change the type or provide a numeric value (e.g., change type to ${assignedType}, or assign a ${expectedType}).`;
+    const explanation = `A ${assignedType} value was assigned to a variable declared as a ${expectedType}. No automatic rewrite was applied: changing the annotation to ${assignedType} alters the declared contract, while changing the value preserves it. Pick the option that matches the intended data.`;
+    const suggestion = `Either assign a ${expectedType} value to '${varName}', or change its declaration to ${assignedType} if ${assignedType} is what it should hold.`;
 
     return {
       analysisSource: 'rules',
-      status: correctedCode ? 'fixed' : 'needs_context',
+      status: 'needs_context',
       errorType: 'TypeScript Error',
       category: 'TYPE',
       title: 'Type Mismatch',
@@ -265,13 +208,17 @@ export function buildLocalAnalysis(
       why,
       recommendedAction: suggestion,
       originalCode,
-      correctedCode,
-      changes,
+      correctedCode: null,
+      changes: [],
       explanation,
-      confidence: 0.9,
-      confidenceLevel: 'HIGH',
-      verificationStatus: validation.verificationStatus,
-      validation,
+      confidence: 0.6,
+      confidenceLevel: 'MEDIUM',
+      verificationStatus: 'NOT_VERIFIED',
+      validation: {
+        status: 'needs_context',
+        message: 'Automated type-annotation rewrite withheld: it would change the declared contract.',
+        checkerUsed: 'local_rules',
+      },
       cause,
       suggestion,
       severity: 'error',
@@ -281,44 +228,22 @@ export function buildLocalAnalysis(
   // -----------------------------------------------------------------
   // 4. Undefined / Null Property Access (e.g. 2532, 18048)
   // -----------------------------------------------------------------
-  if (code === '2532' || code === 'TS2532' || code === '18048' || code === 'TS18048' || msg.includes('undefined') || msg.includes('null') || msg.includes('cannot read property')) {
-    let originalCode = trimmedLine;
-    let correctedCode: string | null = null;
-    let changes: CodeChange[] = [];
-
-    // Dynamically look for property access (e.g. obj.prop) in the line
-    if (trimmedLine) {
-      // Find property access to guard with optional chaining
-      const propAccessMatch = trimmedLine.match(/([a-zA-Z0-9_$]+)\.([a-zA-Z0-9_$]+)/);
-      if (propAccessMatch) {
-        const fullExpr = propAccessMatch[0];
-        const objName = propAccessMatch[1];
-        const propName = propAccessMatch[2];
-        const safeExpr = `${objName}?.${propName}`;
-
-        correctedCode = trimmedLine.replace(fullExpr, safeExpr);
-        changes = [
-          {
-            line,
-            before: fullExpr,
-            after: safeExpr,
-            reason: 'Use optional chaining to safely guard against null/undefined.',
-          },
-        ];
-      }
-    }
-
-    const validation = validateProposedFix({
-      filePath,
-      fileContent: fullContent,
-      originalCode,
-      correctedCode,
-      diagnostic,
-    });
+  if (
+    code === '2531' ||
+    code === 'TS2531' ||
+    code === '2532' ||
+    code === 'TS2532' ||
+    code === '18048' ||
+    code === 'TS18048' ||
+    msg.includes('possibly undefined') ||
+    msg.includes('possibly null') ||
+    msg.includes('cannot read propert')
+  ) {
+    const originalCode = trimmedLine;
 
     return {
       analysisSource: 'rules',
-      status: correctedCode ? 'fixed' : 'needs_context',
+      status: 'needs_context',
       errorType: 'TypeError',
       category: 'NULL / UNDEFINED',
       title: 'Possible Undefined / Null Access',
@@ -330,18 +255,23 @@ export function buildLocalAnalysis(
         'The variable or expression evaluates to null or undefined, causing property access to throw a TypeError.',
       why: 'Dereferencing a property on null or undefined halts execution with a runtime TypeError.',
       recommendedAction:
-        'Verify that the object is defined before property access, or use optional chaining (?.).',
+        'Decide whether the value must be guaranteed before this access (validate, default, or narrow it) or whether the access is legitimately optional.',
       originalCode,
-      correctedCode,
-      changes,
+      correctedCode: null,
+      changes: [],
       explanation:
-        'Attempted to access a property on an object that is or can be undefined/null. Optional chaining (?.) short-circuits evaluation when the target is null or undefined, preventing runtime crashes.',
-      confidence: 0.88,
-      confidenceLevel: 'HIGH',
-      verificationStatus: validation.verificationStatus,
-      validation,
+        'No automatic optional chaining was applied. It silences the diagnostic but can hide a missing value and change behavior. Guarantee the value first, or use optional chaining only when undefined is an expected state.',
+      confidence: 0.55,
+      confidenceLevel: 'MEDIUM',
+      verificationStatus: 'NOT_VERIFIED',
+      validation: {
+        status: 'needs_context',
+        message: 'Automated optional-chaining rewrite withheld: it may mask a real missing value.',
+        checkerUsed: 'local_rules',
+      },
       cause: 'Object may be null or undefined before property dereference.',
-      suggestion: 'Verify that the object is defined before property access, or use optional chaining (?.).',
+      suggestion:
+        'Validate or default the object before accessing it; use optional chaining only if undefined is a valid state here.',
       severity: 'error',
     };
   }

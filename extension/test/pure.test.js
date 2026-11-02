@@ -267,9 +267,12 @@ describe('Local Diagnostic Explanations (Instant Offline Display)', () => {
     assert.strictEqual(res.location.file, 'extension/test-fixtures/ts-mismatch.ts');
     assert.strictEqual(res.location.line, 3);
     assert.strictEqual(res.summary, "Type 'string' is not assignable to type 'number'.");
-    assert.ok(res.explanation.includes('string value was assigned to a variable that was declared as a number'));
+    assert.ok(res.explanation.includes('string value was assigned to a variable declared as a number'));
+    assert.ok(res.explanation.includes('No automatic rewrite was applied'));
+    assert.strictEqual(res.status, 'needs_context');
+    assert.strictEqual(res.correctedCode, null);
     assert.ok(res.cause.includes('userId expects a number'));
-    assert.ok(res.suggestion.includes('Change the type or provide a numeric value'));
+    assert.ok(res.suggestion.includes("assign a number value to 'userId'"));
     assert.strictEqual(res.analysisSource, 'rules');
   });
 
@@ -288,6 +291,8 @@ describe('Local Diagnostic Explanations (Instant Offline Display)', () => {
     const res = buildLocalAnalysis(diagnostic, 'extension/test-fixtures/js-undefined.js');
 
     assert.strictEqual(res.errorType, 'TypeError');
+    assert.strictEqual(res.status, 'needs_context');
+    assert.strictEqual(res.correctedCode, null);
     assert.ok(res.suggestion.includes('optional chaining'));
   });
 
