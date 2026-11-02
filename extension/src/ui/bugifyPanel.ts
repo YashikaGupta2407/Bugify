@@ -313,17 +313,56 @@ export class BugifyPanel {
         return;
       }
 
-      const edit = new vscode.WorkspaceEdit();
 
-      // Check if this is a partial line replacement or full line replacement
-      if (changes && changes.length > 0 && changes[0].before && docLine.text.includes(changes[0].before)) {
-        const startCol = docLine.text.indexOf(changes[0].before);
-        const endCol = startCol + changes[0].before.length;
-        const targetRange = new vscode.Range(lineIdx, startCol, lineIdx, endCol);
-        edit.replace(targetUri, targetRange, changes[0].after);
+      // Use explicit change details when available.
+      // Otherwise, derive a fallback only when the corrected code
+      // provides one unambiguous, exact replacement for this line.
+      let before: string;
+      let after: string;
+      let startCol = docLine.text.indexOf(originalCode?.trim() || ''); // Initialize startCol
+
+      if (
+        changes?.length === 1 &&
+        typeof changes[0].before === 'string' &&
+        changes[0].before.length > 0 &&
+        typeof changes[0].after === 'string'
+      ) {
+        before = changes[0].before;
+        after = changes[0].after;
       } else {
-        edit.replace(targetUri, docLine.range, correctedCode);
+        const candidateBefore = originalCode?.trim();
+        const candidateAfter = correctedCode.trim();
+
+        if (
+          !candidateBefore ||
+          !candidateAfter ||
+          candidateBefore.includes('\n') ||
+          candidateAfter.includes('\n') ||
+          docLine.text.indexOf(candidateBefore) === -1 ||
+          docLine.text.lastIndexOf(candidateBefore) !==
+            docLine.text.indexOf(candidateBefore)
+        ) {
+          vscode.window.showWarningMessage(
+            'Bugify: Cannot safely apply this fix because its change details are missing or ambiguous.'
+          );
+          return;
+        }
+
+        before = candidateBefore;
+        after = candidateAfter;
       }
+
+      if (startCol === -1 || docLine.text.lastIndexOf(before) !== startCol) {
+        vscode.window.showWarningMessage(
+          'Bugify: The original text no longer matches this line. Re-analyze the file before applying the fix.'
+        );
+        return;
+      }
+
+      const endCol = startCol + before.length;
+      const targetRange = new vscode.Range(lineIdx, startCol, lineIdx, endCol);
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(targetUri, targetRange, after);
 
       const applied = await vscode.workspace.applyEdit(edit);
       if (applied) {
@@ -1278,7 +1317,7 @@ export class BugifyPanel {
                       <button type="button" class="btn btn-secondary btn-xs" id="copyFixBtn" data-code="${this.escapeHtml(analysis?.correctedCode || '')}">
                         COPY FIX
                       </button>
-                      <button type="button" class="btn btn-primary btn-xs" id="applyFixBtn" data-file="${this.escapeHtml(selectedFile)}" data-line="${selectedLine}" data-code="${this.escapeHtml(analysis?.correctedCode || '')}">
+                      <button type="button" class="btn btn-primary btn-xs" id="applyFixBtn" data-file="${this.escapeHtml(selectedFile)}" data-line="${selectedLine}" data-code="${this.escapeHtml(analysis?.correctedCode || '')}" data-original="${this.escapeHtml(analysis?.originalCode || '')}" data-changes="${this.escapeHtml(JSON.stringify(analysis?.changes || []))}">
                         APPLY FIX
                       </button>
                     </div>
@@ -1521,7 +1560,27 @@ export class BugifyPanel {
         const file = applyFixBtn.getAttribute('data-file');
         const line = parseInt(applyFixBtn.getAttribute('data-line') || '1', 10);
         const code = applyFixBtn.getAttribute('data-code');
-        vscode.postMessage({ command: 'apply-fix', file, line, code });
+        const originalCode = applyFixBtn.getAttribute('data-original');
+
+        let changes = [];
+        try {
+          changes = JSON.parse(applyFixBtn.getAttribute('data-changes') || '[]');
+        } catch {
+          vscode.postMessage({
+            command: 'show-error',
+            message: 'Cannot apply fix: invalid change data.'
+          });
+          return;
+        }
+
+        vscode.postMessage({
+          command: 'apply-fix',
+          file,
+          line,
+          code,
+          originalCode,
+          changes
+        });
       });
     }
 

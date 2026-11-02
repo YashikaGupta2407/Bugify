@@ -142,6 +142,7 @@ export interface WebviewIncomingMessage {
   source?: string;
   severity?: 'error' | 'warning' | 'information' | 'hint' | string;
   originalCode?: string;
+  changes?: CodeChange[];
   detail?: 'normal' | 'deep';
   diagnostic?: BugifyDiagnostic;
 }
