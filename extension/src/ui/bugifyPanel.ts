@@ -1210,8 +1210,8 @@ export class BugifyPanel {
           ? (analysis?.explanation || 'Apply the corrected code fix to resolve the diagnostic.')
           : (analysis?.suggestion || analysis?.explanation || 'Inspect the referenced line and update declarations or imports.');
 
-        // Verification & Confidence (Strict: Only VERIFIED if genuinely validated)
-        const isVerified = analysis?.verificationStatus === 'VERIFIED' || analysis?.validation?.status === 'validated';
+        // Verification & Confidence (Strict: only a live re-check may mark VERIFIED)
+        const isVerified = analysis?.verificationStatus === 'VERIFIED';
         const verificationText = isVerified
           ? 'FIX VERIFIED'
           : hasSafeFix

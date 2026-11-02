@@ -3,6 +3,7 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const { buildRuleBasedAnalysis } = require('../src/services/aiExplanationService');
+const { validateFix } = require('../src/services/validationService');
 
 describe('Context window line offsets', () => {
   const makeWindow = (startLine, endLine) =>
@@ -139,5 +140,49 @@ describe('Rule engine never fabricates a patch', () => {
     assert.strictEqual(analysis.status, 'needs_context');
     assert.strictEqual(analysis.correctedCode, null);
     assert.deepStrictEqual(analysis.changes, []);
+  });
+});
+
+describe('Validation never reports parse-only checks as validated', () => {
+  test('syntactically valid TypeScript is generated, not validated', () => {
+    const result = validateFix({
+      language: 'typescript',
+      originalCode: 'const answer = compute();',
+      correctedCode: 'const answer: number = compute();',
+      diagnostic: { code: 'TS2322', message: 'Type mismatch' },
+    });
+
+    assert.strictEqual(result.status, 'generated');
+    assert.match(result.message, /unverified/i);
+  });
+
+  test('syntactically valid Python is generated, not validated', () => {
+    const result = validateFix({
+      language: 'python',
+      originalCode: 'value = compute()',
+      correctedCode: 'value: int = compute()',
+    });
+
+    assert.notStrictEqual(result.status, 'validated');
+  });
+
+  test('rejects a candidate identical to the original code', () => {
+    const result = validateFix({
+      language: 'typescript',
+      originalCode: 'const answer = compute();',
+      correctedCode: 'const answer = compute();',
+    });
+
+    assert.strictEqual(result.status, 'validation_failed');
+  });
+
+  test('rejects malformed candidate code before it reaches the editor', () => {
+    const result = validateFix({
+      language: 'typescript',
+      originalCode: 'const answer = compute();',
+      correctedCode: 'const = ;',
+    });
+
+    assert.strictEqual(result.status, 'validation_failed');
   });
 });
