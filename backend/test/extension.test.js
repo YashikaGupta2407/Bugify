@@ -45,7 +45,7 @@ MIIEowIBAAKCAQEA0Y1+abcdefghijklmnopqrstuvwxyz
 });
 
 describe('Extension API Endpoints', () => {
-  const BASE_URL = 'http://127.0.0.1:5000';
+  const BASE_URL = 'http://127.0.0.1:5001';
 
   test('POST /api/extension/analyze returns 400 for invalid mode', async () => {
     const res = await fetch(`${BASE_URL}/api/extension/analyze`, {
