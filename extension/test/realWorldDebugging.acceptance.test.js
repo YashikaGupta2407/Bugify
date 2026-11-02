@@ -215,9 +215,10 @@ describe('Phase 13 Acceptance Tests: Real-World Multi-Language Scenarios', () =>
       mismatchFile
     );
 
-    assert.strictEqual(analysis.status, 'fixed');
+    assert.strictEqual(analysis.status, 'needs_context');
     assert.strictEqual(analysis.originalCode, 'let port: number = "8080";');
-    assert.strictEqual(analysis.correctedCode, 'let port: string = "8080";');
+    assert.strictEqual(analysis.correctedCode, null);
+    assert.deepStrictEqual(analysis.changes, []);
     assert.strictEqual(analysis.verificationStatus, 'NOT_VERIFIED');
   });
 

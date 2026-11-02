@@ -28,7 +28,8 @@ Rules:
   "suggestion": "Specific, actionable guidance on what the developer should check or change.",
   "correctedCode": "The corrected version of the code snippet that fixes the bug while preserving the user's logic."
 }`;
-const AI_TIMEOUT_MS = 15000;
+const AI_TIMEOUT_MS = 12000;
+const MAX_AI_ATTEMPTS = 1;
 
 async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController();
@@ -457,6 +458,7 @@ function buildRuleBasedAnalysis({
   diagnostics = [],
   errorType,
   codeContext = '',
+  contextStartLine,
   functionContext,
   imports,
   dependencies,
@@ -471,24 +473,31 @@ function buildRuleBasedAnalysis({
   const diagMsg = primaryDiag?.message || 'Code inspection requested';
   const filePath = file?.path || 'unknown';
 
-  // Extract relevant original code line from codeContext if available
+  // Extract relevant original code line from codeContext if available.
+  // codeContext is a window starting at contextStartLine, so the target line
+  // must be indexed relative to that window rather than from line 1.
   const contextLines = (codeContext || '').split(/\r?\n/);
-  let relevantLine = '';
-  if (contextLines.length > 0) {
-    const errorLineIdx = targetLine > 0 && targetLine <= contextLines.length ? targetLine - 1 : 0;
-    relevantLine = contextLines[errorLineIdx]?.trim() || contextLines[0]?.trim() || '';
-  }
+  const windowStartLine =
+    Number.isInteger(contextStartLine) && contextStartLine > 0 ? contextStartLine : 1;
+  const targetLineIdx = targetLine - windowStartLine;
+  const relevantLine =
+    targetLineIdx >= 0 && targetLineIdx < contextLines.length
+      ? (contextLines[targetLineIdx] || '').trim()
+      : '';
 
-  let status = 'fixed';
-  let title = `Issue at line ${targetLine}`;
-  let summary = diagMsg;
+  // The rule engine only explains diagnostics. It cannot see enough of the
+  // program to prove a patch is correct, so it never emits correctedCode or
+  // changes; a wrong "fix" is worse than an honest request for more context.
+  const status = 'needs_context';
+  let title = `Issue at line ${targetLine}`;  let summary = diagMsg;
   let rootCause = 'The language server detected code that does not satisfy language constraints.';
   let whyItHappens = 'Code statements must comply with syntax, scope, and type checking rules.';
-  let originalCode = relevantLine || diagMsg;
-  let correctedCode = null;
-  let changes = [];
-  let explanation = 'Review the highlighted statements and adjust types or values accordingly.';
-  let confidence = 0.85;
+  const originalCode = relevantLine;
+  const correctedCode = null;
+  const changes = [];
+  let explanation =
+    'No automatic fix was generated because the rule engine cannot verify a replacement without the full program. Inspect the highlighted line and apply the smallest change that satisfies the diagnostic.';
+  let confidence = 0.5;
 
   const codeStr = String(primaryDiag?.code || '');
   const msgLower = diagMsg.toLowerCase();
@@ -496,129 +505,75 @@ function buildRuleBasedAnalysis({
   // 1. TypeScript Type Mismatch (e.g. 2322)
   if (codeStr === '2322' || msgLower.includes('not assignable to type')) {
     title = 'Type Mismatch';
-    summary = `Type mismatch: assigned value is not assignable to the declared type.`;
-    rootCause = `The variable or property is annotated with a specific type, but received a value of an incompatible type. In statically typed languages, values must match their declared type contracts.`;
-    whyItHappens = `TypeScript catches type discrepancies at compile time to prevent runtime errors and ensure interface contracts remain valid.`;
-    
-    // Check if user is assigning string to number e.g. let userId: number = "user_42"
-    if (codeContext.includes('let userId: number = "user_42"') || (relevantLine.includes('number') && relevantLine.includes('"'))) {
-      originalCode = relevantLine || 'let userId: number = "user_42";';
-      correctedCode = 'let userId: string = "user_42";';
-      changes = [
-        {
-          line: targetLine,
-          before: originalCode,
-          after: correctedCode,
-          reason: 'Update the variable type annotation from number to string to match the string ID literal.',
-        },
-      ];
-      explanation = 'Changing the type annotation to string preserves the intended user identifier value while satisfying TypeScript static type checking.';
-      confidence = 0.95;
-    } else {
-      originalCode = relevantLine;
-      correctedCode = relevantLine.replace(/:\s*number\b/, ': string');
-      changes = [
-        {
-          line: targetLine,
-          before: relevantLine,
-          after: correctedCode,
-          reason: 'Align type signature with the assigned value.',
-        },
-      ];
-      explanation = 'Aligning the declared type signature with the assignment prevents compile-time type errors.';
-    }
+    summary = 'Type mismatch: assigned value is not assignable to the declared type.';
+    rootCause =
+      'The variable or property is annotated with a specific type, but received a value of an incompatible type. In statically typed languages, values must match their declared type contracts.';
+    whyItHappens =
+      'TypeScript catches type discrepancies at compile time to prevent runtime errors and ensure interface contracts remain valid.';
+    explanation =
+      'Decide which side expresses the intent: change the assigned value so it matches the declared type, or change the annotation if the value is the intended representation. The rule engine does not guess between them.';
+    confidence = 0.6;
   }
   // 2. Undefined / Null property access (e.g. 2532)
-  else if (codeStr === '2532' || msgLower.includes('undefined') || msgLower.includes('null') || msgLower.includes('cannot read properties')) {
+  else if (
+    codeStr === '2532' ||
+    codeStr === '2531' ||
+    codeStr === '18048' ||
+    msgLower.includes('possibly undefined') ||
+    msgLower.includes('possibly null') ||
+    msgLower.includes('cannot read propert')
+  ) {
     errorType = 'TypeError';
     title = 'Undefined Property Access';
     summary = `Attempted property access on an object that is or may be undefined (${diagMsg}).`;
-    rootCause = `The target reference has not been verified to exist prior to dereferencing properties. In JavaScript/TypeScript, evaluating property access on null or undefined throws a runtime TypeError.`;
-    whyItHappens = `Runtime engines halt execution when attempting to look up keys on uninitialized or nullish object variables.`;
-
-    if (codeContext.includes('user.name') || relevantLine.includes('user.name')) {
-      originalCode = 'console.log(user.name);';
-      correctedCode = 'console.log(user?.name);';
-      changes = [
-        {
-          line: targetLine,
-          before: 'console.log(user.name);',
-          after: 'console.log(user?.name);',
-          reason: 'Use optional chaining (?.) so evaluating undefined results in undefined rather than a crash.',
-        },
-      ];
-      explanation = 'Using optional chaining (?.) safely evaluates nullish references without throwing an unhandled exception.';
-      confidence = 0.95;
-    } else {
-      originalCode = relevantLine;
-      correctedCode = relevantLine.replace(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/, '$1?.$2');
-      changes = [
-        {
-          line: targetLine,
-          before: originalCode,
-          after: correctedCode,
-          reason: 'Guard property dereferencing with optional chaining.',
-        },
-      ];
-      explanation = 'Guarding property access avoids runtime null-pointer crashes.';
-    }
+    rootCause =
+      'The target reference has not been verified to exist prior to dereferencing properties. In JavaScript/TypeScript, evaluating property access on null or undefined throws a runtime TypeError.';
+    whyItHappens =
+      'Runtime engines halt execution when attempting to look up keys on uninitialized or nullish object variables.';
+    explanation =
+      'Decide whether the value should be guaranteed before this line (validate it, default it, or narrow its type) or whether this access is optional. Optional chaining only hides a missing value; it is not always the correct fix.';
+    confidence = 0.55;
   }
   // 3. Undeclared Identifier / ReferenceError (e.g. 2304)
-  else if (codeStr === '2304' || msgLower.includes('cannot find name') || errorType === 'ReferenceError' || errorType === 'NameError') {
+  else if (
+    codeStr === '2304' ||
+    msgLower.includes('cannot find name') ||
+    errorType === 'ReferenceError' ||
+    errorType === 'NameError'
+  ) {
     const varMatch =
-      diagMsg.match(/['"]([^'"]+)['"]/) ||
-      diagMsg.match(/^(\w+)\s+is not defined/i) ||
-      (relevantLine ? relevantLine.match(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/) : null);
-    const varName = varMatch ? varMatch[1] : 'identifier';
-    errorType = 'ReferenceError';
-    title = `Cannot find name '${varName}'`;
-    summary = `Identifier '${varName}' is referenced before declaration or import.`;
-    rootCause = `The symbol '${varName}' does not exist in the current lexical scope or top-level module imports.`;
-    whyItHappens = `The runtime environment cannot resolve the memory location of an identifier that has not been bound in scope.`;
+      diagMsg.match(/Cannot find name ['"]([^'"]+)['"]/i) ||
+      diagMsg.match(/['"]([^'"]+)['"] is not defined/i);
 
-    originalCode = relevantLine || `console.log(${varName});`;
-    correctedCode = `const ${varName} = "";\n${originalCode}`;
-    changes = [
-      {
-        line: targetLine,
-        before: originalCode,
-        after: correctedCode,
-        reason: `Declare '${varName}' in scope before referencing it.`,
-      },
-    ];
-    explanation = `Declaring the variable in scope creates the required binding and allows the statement to execute safely.`;
-    confidence = 0.9;
+    const varName = varMatch ? varMatch[1] : null;
+
+    errorType = 'ReferenceError';
+    title = varName ? `Cannot find name '${varName}'` : 'Undefined identifier';
+    summary = varName
+      ? `Identifier '${varName}' is referenced but its intended value cannot be determined safely.`
+      : 'An identifier may be undefined, but its name could not be identified reliably.';
+    rootCause = 'The referenced identifier is not available in the current scope.';
+    whyItHappens =
+      'The identifier may be misspelled, missing an import, or intended to refer to a variable declared elsewhere.';
+    explanation =
+      'No automatic fix was generated because inventing a declaration or value could change program behavior. Check the identifier spelling, surrounding scope, and imports.';
   }
   // 4. Python / JS IndexError
-  else if (errorType === 'IndexError' || msgLower.includes('index out of range') || (relevantLine.includes('[10]') && relevantLine.includes('numbers'))) {
+  else if (errorType === 'IndexError' || msgLower.includes('index out of range')) {
     errorType = 'IndexError';
     title = 'List Index Out of Range';
     summary = 'Attempted to access an index outside collection boundaries.';
-    rootCause = 'The collection does not contain enough elements to satisfy the requested index. Indices are zero-based and must be strictly less than the length.';
-    whyItHappens = 'Indexing past the end of an array or list attempts to read non-existent memory elements.';
-
-    originalCode = relevantLine || 'print(numbers[10])';
-    if (language === 'python') {
-      correctedCode = `if len(numbers) > 10:\n    print(numbers[10])\nelse:\n    print("Index out of range")`;
-    } else {
-      correctedCode = `if (numbers.length > 10) {\n  console.log(numbers[10]);\n}`;
-    }
-    changes = [
-      {
-        line: targetLine,
-        before: originalCode,
-        after: correctedCode,
-        reason: 'Verify collection length before accessing the index.',
-      },
-    ];
-    explanation = 'Checking collection bounds before indexing prevents runtime IndexErrors.';
-    confidence = 0.9;
+    rootCause =
+      'The collection does not contain enough elements to satisfy the requested index. Indices are zero-based and must be strictly less than the length.';
+    whyItHappens =
+      'Indexing past the end of an array or list attempts to read non-existent memory elements.';
+    explanation =
+      'Verify the expected collection size and whether the index is correct. Guarding the access is only right when an out-of-range index is a valid state.';
+    confidence = 0.55;
   }
   // 5. Default generic rule
   else {
-    originalCode = relevantLine;
-    correctedCode = relevantLine;
-    explanation = `Inspect line ${targetLine} and align the statements with language syntax.`;
+    explanation = `Inspect line ${targetLine} and align the statements with language syntax. No automatic fix was generated.`;
   }
 
   const analysis = {
@@ -676,6 +631,48 @@ function cleanAndParseJson(rawText) {
 /**
  * Service to analyze VS Code extension diagnostics with AI, falling back to rules.
  */
+/**
+ * Rejects model-proposed changes that cannot be applied verbatim to the code window.
+ * A patch whose "before" text is absent or outside the window is not a fix; it is a guess.
+ */
+function validateModelChanges(changes, codeContext, windowStartLine) {
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return { changes: [] };
+  }
+
+  const contextLines = (codeContext || '').split(/\r?\n/);
+  const windowEndLine = windowStartLine + contextLines.length - 1;
+  const accepted = [];
+
+  for (const change of changes) {
+    if (!change || typeof change.before !== 'string' || change.before.length === 0) {
+      return { error: 'The model proposed a change without verbatim original text.' };
+    }
+    if (typeof change.after !== 'string' || change.after === change.before) {
+      return { error: 'The model proposed a no-op or malformed change.' };
+    }
+
+    const line = Number(change.line);
+    if (!Number.isInteger(line) || line < windowStartLine || line > windowEndLine) {
+      return { error: `The model proposed a change on line ${change.line}, outside the analysed window.` };
+    }
+
+    const targetText = contextLines[line - windowStartLine] || '';
+    if (!targetText.includes(change.before) && !codeContext.includes(change.before)) {
+      return { error: 'The model proposed a change whose original text is not present in the code window.' };
+    }
+
+    accepted.push({
+      line,
+      before: change.before,
+      after: change.after,
+      reason: String(change.reason || ''),
+    });
+  }
+
+  return { changes: accepted };
+}
+
 async function explainExtensionDiagnostic({
   mode,
   detail = 'normal',
@@ -684,6 +681,8 @@ async function explainExtensionDiagnostic({
   cursor,
   selection,
   codeContext,
+  contextStartLine,
+  contextEndLine,
   functionContext,
   imports,
   dependencies,
@@ -706,6 +705,8 @@ async function explainExtensionDiagnostic({
   const endLine = primaryDiag?.endLine || targetLine;
   const endCol = primaryDiag?.endColumn || 20;
   const lang = language || file?.language || 'plaintext';
+  const windowStartLine =
+    Number.isInteger(contextStartLine) && contextStartLine > 0 ? contextStartLine : 1;
 
   // const apiKey = process.env.AI_API_KEY || process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY;
   // const provider = (process.env.AI_PROVIDER || (process.env.OPENAI_API_KEY ? 'openai' : 'gemini')).toLowerCase();
@@ -735,6 +736,7 @@ async function explainExtensionDiagnostic({
       diagnostics,
       errorType,
       codeContext: safeCodeContext,
+      contextStartLine,
       functionContext: safeFunctionContext,
       imports: safeImports,
       dependencies,
@@ -742,6 +744,18 @@ async function explainExtensionDiagnostic({
       language: lang,
     });
   }
+
+  // Number the window lines with their real file line numbers so the model
+  // can address the diagnostic precisely instead of guessing an index.
+  const contextWindowLines = safeCodeContext.split(/\r?\n/);
+  const numberedContext = contextWindowLines
+    .map((line, index) => `${windowStartLine + index} | ${line}`)
+    .join('\n');
+  const targetLineIdx = targetLine - windowStartLine;
+  const targetLineText =
+    targetLineIdx >= 0 && targetLineIdx < contextWindowLines.length
+      ? contextWindowLines[targetLineIdx]
+      : '';
 
   const extensionPrompt = `You are Bugify, a software debugging assistant.
 Diagnose the actual root cause of this error and propose the exact code fix.
@@ -757,9 +771,13 @@ Severity: ${severity}
 
 ${safeImports ? `Relevant File Imports:\n\`\`\`${lang}\n${safeImports}\n\`\`\`\n` : ''}
 ${safeFunctionContext ? `Enclosing Function Context:\n\`\`\`${lang}\n${safeFunctionContext}\n\`\`\`\n` : ''}
-Active Code Window (Surrounding Lines):
+Numbered Code Window (left number is the real file line number):
 \`\`\`${lang}
-${safeCodeContext}
+${numberedContext}
+\`\`\`
+Diagnostic Line (verbatim from line ${targetLine}):
+\`\`\`${lang}
+${targetLineText}
 \`\`\`
 ${safeSelection ? `User Selection:\n\`\`\`${lang}\n${safeSelection}\n\`\`\`\n` : ''}
 ${dependencies ? `Workspace Dependencies:\n${JSON.stringify(dependencies, null, 2)}\n` : ''}
@@ -770,6 +788,12 @@ Determine:
 3. What exact code should be changed?
 4. What should the corrected code be? (Do NOT use simplistic workarounds like 'as any', '@ts-ignore', 'eslint-disable')
 5. If the context is ambiguous or insufficient to safely fix, set "status": "needs_context".
+
+Patch rules:
+- Every "line" value MUST be an absolute file line number from the numbered window.
+- "before" MUST be copied verbatim from that line so the client can locate it.
+- Only change what the diagnostic requires; do not rewrite unrelated lines.
+- If you cannot copy the exact "before" text, set "status": "needs_context".
 
 Return ONLY valid JSON matching this schema:
 {
@@ -801,7 +825,7 @@ Return ONLY valid JSON matching this schema:
 }`;
 
   let attempts = 0;
-  while (attempts < 2) {
+  while (attempts < MAX_AI_ATTEMPTS) {
     attempts++;
     try {
       let rawResult;
@@ -828,18 +852,43 @@ Return ONLY valid JSON matching this schema:
         });
       }
       if (rawResult && rawResult.summary && (rawResult.rootCause || rawResult.cause)) {
-        const correctedCode = rawResult.correctedCode ? String(rawResult.correctedCode) : null;
-        const originalCode = rawResult.originalCode ? String(rawResult.originalCode) : '';
-        const status = rawResult.status || (correctedCode ? 'fixed' : 'needs_context');
+        let correctedCode = rawResult.correctedCode ? String(rawResult.correctedCode) : null;
+        let originalCode = rawResult.originalCode ? String(rawResult.originalCode) : '';
+        let status = rawResult.status || (correctedCode ? 'fixed' : 'needs_context');
 
-        // Run validation pipeline on generated fix
-        const validation = validateFix({
-          language: lang,
-          originalCode,
-          correctedCode,
-          status,
-          diagnostic: primaryDiag,
-        });
+        const changesCheck = validateModelChanges(
+          rawResult.changes,
+          safeCodeContext,
+          windowStartLine
+        );
+        const originalTextInWindow =
+          !originalCode || safeCodeContext.includes(originalCode.trim());
+
+        let withheldReason = null;
+        if (changesCheck.error) {
+          withheldReason = changesCheck.error;
+        } else if (correctedCode && !originalTextInWindow) {
+          withheldReason =
+            'The model proposed a fix whose original text is not present in the code window.';
+        } else if (status === 'fixed' && !correctedCode && changesCheck.changes.length === 0) {
+          withheldReason = 'The model reported a fix without any applicable change.';
+        }
+
+        if (withheldReason) {
+          status = 'needs_context';
+          correctedCode = null;
+          originalCode = '';
+        }
+
+        const validation = withheldReason
+          ? { status: 'needs_context', message: withheldReason, checkerUsed: 'patch-validator' }
+          : validateFix({
+              language: lang,
+              originalCode,
+              correctedCode,
+              status,
+              diagnostic: primaryDiag,
+            });
 
         return {
           analysisSource: 'ai',
@@ -859,7 +908,7 @@ Return ONLY valid JSON matching this schema:
           whyItHappens: String(rawResult.whyItHappens || rawResult.explanation || ''),
           originalCode,
           correctedCode,
-          changes: Array.isArray(rawResult.changes) ? rawResult.changes : [],
+          changes: withheldReason ? [] : changesCheck.changes,
           explanation: String(rawResult.explanation || ''),
           confidence: typeof rawResult.confidence === 'number' ? rawResult.confidence : 0.9,
           severity,
@@ -883,6 +932,7 @@ Return ONLY valid JSON matching this schema:
     diagnostics,
     errorType,
     codeContext: safeCodeContext,
+    contextStartLine,
     functionContext: safeFunctionContext,
     imports: safeImports,
     dependencies,
@@ -896,5 +946,6 @@ module.exports = {
   generateHeuristicExplanation,
   explainExtensionDiagnostic,
   buildRuleBasedAnalysis,
+  validateModelChanges,
 };
 

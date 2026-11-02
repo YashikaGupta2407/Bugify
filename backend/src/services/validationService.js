@@ -43,6 +43,14 @@ function validateFix({ language = 'plaintext', originalCode, correctedCode, stat
     };
   }
 
+  if (originalCode && correctedCode.trim() === String(originalCode).trim()) {
+    return {
+      status: 'validation_failed',
+      message: 'Proposed change is identical to the original code.',
+      checkerUsed: 'diff-checker',
+    };
+  }
+
   const lang = language.toLowerCase();
 
   // 1. Anti-pattern detection (suppression instead of fixing)
@@ -90,8 +98,9 @@ function validateFix({ language = 'plaintext', originalCode, correctedCode, stat
         }
 
         return {
-          status: 'validated',
-          message: 'Syntax and AST structure verified against TypeScript parser',
+          status: 'generated',
+          message:
+            'Replacement parses cleanly, but the diagnostic has not been re-checked. Fix remains unverified.',
           checkerUsed: 'typescript-parser',
         };
       } catch (err) {
@@ -126,8 +135,9 @@ function validateFix({ language = 'plaintext', originalCode, correctedCode, stat
       }
 
       return {
-        status: 'validated',
-        message: 'Python AST syntax parsing verified cleanly',
+        status: 'generated',
+        message:
+          'Replacement parses cleanly, but the diagnostic has not been re-checked. Fix remains unverified.',
         checkerUsed: 'python3-ast',
       };
     } catch (err) {

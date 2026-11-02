@@ -12,10 +12,12 @@ import {
   AnalysisResult,
   BugifyDiagnostic,
   AnalyzeRequest,
+  CodeChange,
   WorkspaceFileIssues,
 } from '../types/bugify';
 import { BugifyApiClient } from '../api/bugifyApi';
 import { DiagnosticCollector } from '../diagnostics/diagnosticCollector';
+import { planPatches } from '../diagnostics/patchPlanner';
 import { collectActiveContext, collectDocumentContext } from '../context/contextCollector';
 import { buildLocalAnalysis } from '../diagnostics/localAnalysis';
 import { WorkspaceScanner } from '../scanner/workspaceScanner';
@@ -310,11 +312,70 @@ export class BugifyPanel {
           case 'retry':
             await this.runAiAnalysis('normal', true);
             break;
+
+          case 'show-error':
+            if (message.message) {
+              vscode.window.showErrorMessage(`Bugify: ${message.message}`);
+            }
+            break;
         }
       },
       null,
       this.disposables
     );
+  }
+
+  /**
+   * Resolves the file to patch, preferring the already-open document and then
+   * searching every workspace folder instead of assuming the first one.
+   */
+  private async resolveFixTargetUri(filePath?: string): Promise<vscode.Uri | undefined> {
+    const normalized = filePath?.replace(/\\/g, '/');
+    const activeDoc = vscode.window.activeTextEditor?.document;
+
+    if (normalized && activeDoc) {
+      const activeRelative = vscode.workspace.asRelativePath(activeDoc.uri, false).replace(/\\/g, '/');
+      if (activeRelative === normalized) {
+        return activeDoc.uri;
+      }
+    }
+
+    if (normalized) {
+      for (const folder of vscode.workspace.workspaceFolders || []) {
+        const candidate = vscode.Uri.joinPath(folder.uri, normalized);
+        try {
+          await vscode.workspace.fs.stat(candidate);
+          return candidate;
+        } catch {
+          // Not in this workspace folder; keep looking.
+        }
+      }
+    }
+
+    return activeDoc?.uri;
+  }
+
+  /**
+   * Waits briefly for the language server to refresh diagnostics on the edited lines.
+   */
+  private async editedLinesStatus(
+    uri: vscode.Uri,
+    editedLines: Set<number>,
+    timeoutMs = 1500
+  ): Promise<'cleared' | 'present'> {
+    const hasDiagnosticOnEditedLine = () =>
+      vscode.languages.getDiagnostics(uri).some((diagnostic) =>
+        Array.from(editedLines).some(
+          (line) => diagnostic.range.start.line <= line && diagnostic.range.end.line >= line
+        )
+      );
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (!hasDiagnosticOnEditedLine()) return 'cleared';
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    return hasDiagnosticOnEditedLine() ? 'present' : 'cleared';
   }
 
   /**
@@ -325,42 +386,44 @@ export class BugifyPanel {
     targetLine?: number,
     correctedCode?: string,
     originalCode?: string,
-    changes?: any[]
+    changes?: CodeChange[]
   ): Promise<void> {
-    if (!correctedCode) {
-      vscode.window.showWarningMessage('Bugify: No corrected code available to apply.');
-      return;
-    }
-
     try {
-      const workspaceFolders = vscode.workspace.workspaceFolders;
-      let targetUri: vscode.Uri | undefined;
-
-      if (filePath && workspaceFolders && workspaceFolders.length > 0) {
-        targetUri = vscode.Uri.joinPath(workspaceFolders[0].uri, filePath);
-      } else {
-        const activeDoc = vscode.window.activeTextEditor?.document;
-        if (activeDoc) targetUri = activeDoc.uri;
-      }
-
+      const targetUri = await this.resolveFixTargetUri(filePath);
       if (!targetUri) {
         vscode.window.showErrorMessage('Bugify: Could not determine target file to apply fix.');
         return;
       }
 
       const doc = await vscode.workspace.openTextDocument(targetUri);
-      const lineNum = targetLine && targetLine > 0 ? targetLine : 1;
-      const lineIdx = Math.max(0, Math.min(lineNum - 1, doc.lineCount - 1));
-      const docLine = doc.lineAt(lineIdx);
+      const expectedVersion = doc.version;
 
-      // Prepare preview detail for user confirmation
-      const changeDetail =
-        changes && changes.length > 0 && changes[0].before
-          ? `BEFORE:\n${changes[0].before}\n\nAFTER:\n${changes[0].after}`
-          : `BEFORE:\n${docLine.text}\n\nAFTER:\n${correctedCode}`;
+      const plan = planPatches({
+        text: doc.getText(),
+        changes,
+        targetLine,
+        originalCode,
+        correctedCode,
+      });
+
+      if (!plan.ok) {
+        vscode.window.showWarningMessage(`Bugify: Cannot safely apply this fix — ${plan.reason}.`);
+        return;
+      }
+
+      const ranges = plan.patches.map(
+        (patch) =>
+          new vscode.Range(doc.positionAt(patch.startOffset), doc.positionAt(patch.endOffset))
+      );
+
+      const changeDetail = plan.patches
+        .map((patch) => `BEFORE:\n${patch.before}\n\nAFTER:\n${patch.after}`)
+        .join('\n\n---\n\n');
 
       const choice = await vscode.window.showInformationMessage(
-        `Apply Bugify fix to ${filePath || 'file'} at line ${lineNum}?`,
+        `Apply Bugify fix to ${filePath || 'file'} (${plan.patches.length} change${
+          plan.patches.length === 1 ? '' : 's'
+        })?`,
         { modal: true, detail: changeDetail },
         'Apply Fix',
         'Cancel'
@@ -370,29 +433,52 @@ export class BugifyPanel {
         return;
       }
 
-      const edit = new vscode.WorkspaceEdit();
+      // The document may have changed while the confirmation dialog was open.
+      if (doc.version !== expectedVersion) {
+        vscode.window.showWarningMessage(
+          'Bugify: The file changed while the fix was pending. Re-analyze before applying.'
+        );
+        return;
+      }
 
-      // Check if this is a partial line replacement or full line replacement
-      if (changes && changes.length > 0 && changes[0].before && docLine.text.includes(changes[0].before)) {
-        const startCol = docLine.text.indexOf(changes[0].before);
-        const endCol = startCol + changes[0].before.length;
-        const targetRange = new vscode.Range(lineIdx, startCol, lineIdx, endCol);
-        edit.replace(targetUri, targetRange, changes[0].after);
-      } else {
-        edit.replace(targetUri, docLine.range, correctedCode);
+      const edit = new vscode.WorkspaceEdit();
+      for (let i = 0; i < plan.patches.length; i++) {
+        if (doc.getText(ranges[i]) !== plan.patches[i].before) {
+          vscode.window.showWarningMessage(
+            'Bugify: The original text no longer matches this file. Re-analyze before applying the fix.'
+          );
+          return;
+        }
+        edit.replace(targetUri, ranges[i], plan.patches[i].after);
+      }
+
+      const editedLines = new Set<number>();
+      for (const range of ranges) {
+        for (let line = range.start.line; line <= range.end.line; line++) {
+          editedLines.add(line);
+        }
       }
 
       const applied = await vscode.workspace.applyEdit(edit);
-      if (applied) {
-        vscode.window.showInformationMessage(
-          `Bugify: Fix applied to line ${lineNum}. Press Cmd+Z / Ctrl+Z to undo.`
-        );
-        const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
-        const pos = new vscode.Position(lineIdx, 0);
-        editor.selection = new vscode.Selection(pos, pos);
-        editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
-      } else {
+      if (!applied) {
         vscode.window.showErrorMessage('Bugify: Could not apply workspace edit.');
+        return;
+      }
+
+      const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+      const pos = new vscode.Position(ranges[0].start.line, 0);
+      editor.selection = new vscode.Selection(pos, pos);
+      editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+
+      const status = await this.editedLinesStatus(targetUri, editedLines);
+      if (status === 'cleared') {
+        vscode.window.showInformationMessage(
+          'Bugify: Fix applied and the diagnostic is no longer reported on the edited lines. Press Cmd+Z / Ctrl+Z to undo.'
+        );
+      } else {
+        vscode.window.showWarningMessage(
+          'Bugify: Fix applied, but a diagnostic is still reported on the edited lines (or the language server has not refreshed yet). Review the Problems panel.'
+        );
       }
     } catch (err: any) {
       vscode.window.showErrorMessage(`Bugify: Error applying fix: ${err.message || err}`);
@@ -1228,8 +1314,8 @@ export class BugifyPanel {
           ? (analysis?.explanation || 'Apply the corrected code fix to resolve the diagnostic.')
           : (analysis?.suggestion || analysis?.explanation || 'Inspect the referenced line and update declarations or imports.');
 
-        // Verification & Confidence (Strict: Only VERIFIED if genuinely validated)
-        const isVerified = analysis?.verificationStatus === 'VERIFIED' || analysis?.validation?.status === 'validated';
+        // Verification & Confidence (Strict: only a live re-check may mark VERIFIED)
+        const isVerified = analysis?.verificationStatus === 'VERIFIED';
         const verificationText = isVerified
           ? 'FIX VERIFIED'
           : hasSafeFix
@@ -1335,7 +1421,7 @@ export class BugifyPanel {
                       <button type="button" class="btn btn-secondary btn-xs" id="copyFixBtn" data-code="${this.escapeHtml(analysis?.correctedCode || '')}">
                         COPY FIX
                       </button>
-                      <button type="button" class="btn btn-primary btn-xs" id="applyFixBtn" data-file="${this.escapeHtml(selectedFile)}" data-line="${selectedLine}" data-code="${this.escapeHtml(analysis?.correctedCode || '')}">
+                      <button type="button" class="btn btn-primary btn-xs" id="applyFixBtn" data-file="${this.escapeHtml(selectedFile)}" data-line="${selectedLine}" data-code="${this.escapeHtml(analysis?.correctedCode || '')}" data-original="${this.escapeHtml(analysis?.originalCode || '')}" data-changes="${this.escapeHtml(JSON.stringify(analysis?.changes || []))}">
                         APPLY FIX
                       </button>
                     </div>
@@ -1578,7 +1664,27 @@ export class BugifyPanel {
         const file = applyFixBtn.getAttribute('data-file');
         const line = parseInt(applyFixBtn.getAttribute('data-line') || '1', 10);
         const code = applyFixBtn.getAttribute('data-code');
-        vscode.postMessage({ command: 'apply-fix', file, line, code });
+        const originalCode = applyFixBtn.getAttribute('data-original');
+
+        let changes = [];
+        try {
+          changes = JSON.parse(applyFixBtn.getAttribute('data-changes') || '[]');
+        } catch {
+          vscode.postMessage({
+            command: 'show-error',
+            message: 'Cannot apply fix: invalid change data.'
+          });
+          return;
+        }
+
+        vscode.postMessage({
+          command: 'apply-fix',
+          file,
+          line,
+          code,
+          originalCode,
+          changes
+        });
       });
     }
 

@@ -61,6 +61,9 @@ export interface AnalyzeRequest {
   };
   selection?: string;
   codeContext: string;
+  contextStartLine?: number;
+  contextEndLine?: number;
+  documentVersion?: number;
   functionContext?: string;
   imports?: string;
   dependencies?: Record<string, string>;
@@ -142,6 +145,7 @@ export interface WebviewIncomingMessage {
   source?: string;
   severity?: 'error' | 'warning' | 'information' | 'hint' | string;
   originalCode?: string;
+  changes?: CodeChange[];
   detail?: 'normal' | 'deep';
   diagnostic?: BugifyDiagnostic;
 }
