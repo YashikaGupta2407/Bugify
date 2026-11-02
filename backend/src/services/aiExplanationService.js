@@ -484,16 +484,19 @@ function buildRuleBasedAnalysis({
       ? (contextLines[targetLineIdx] || '').trim()
       : '';
 
-  let status = 'fixed';
-  let title = `Issue at line ${targetLine}`;
-  let summary = diagMsg;
+  // The rule engine only explains diagnostics. It cannot see enough of the
+  // program to prove a patch is correct, so it never emits correctedCode or
+  // changes; a wrong "fix" is worse than an honest request for more context.
+  const status = 'needs_context';
+  let title = `Issue at line ${targetLine}`;  let summary = diagMsg;
   let rootCause = 'The language server detected code that does not satisfy language constraints.';
   let whyItHappens = 'Code statements must comply with syntax, scope, and type checking rules.';
-  let originalCode = relevantLine || diagMsg;
-  let correctedCode = null;
-  let changes = [];
-  let explanation = 'Review the highlighted statements and adjust types or values accordingly.';
-  let confidence = 0.85;
+  const originalCode = relevantLine;
+  const correctedCode = null;
+  const changes = [];
+  let explanation =
+    'No automatic fix was generated because the rule engine cannot verify a replacement without the full program. Inspect the highlighted line and apply the smallest change that satisfies the diagnostic.';
+  let confidence = 0.5;
 
   const codeStr = String(primaryDiag?.code || '');
   const msgLower = diagMsg.toLowerCase();
@@ -501,72 +504,34 @@ function buildRuleBasedAnalysis({
   // 1. TypeScript Type Mismatch (e.g. 2322)
   if (codeStr === '2322' || msgLower.includes('not assignable to type')) {
     title = 'Type Mismatch';
-    summary = `Type mismatch: assigned value is not assignable to the declared type.`;
-    rootCause = `The variable or property is annotated with a specific type, but received a value of an incompatible type. In statically typed languages, values must match their declared type contracts.`;
-    whyItHappens = `TypeScript catches type discrepancies at compile time to prevent runtime errors and ensure interface contracts remain valid.`;
-    
-    // Check if user is assigning string to number e.g. let userId: number = "user_42"
-    if (codeContext.includes('let userId: number = "user_42"') || (relevantLine.includes('number') && relevantLine.includes('"'))) {
-      originalCode = relevantLine || 'let userId: number = "user_42";';
-      correctedCode = 'let userId: string = "user_42";';
-      changes = [
-        {
-          line: targetLine,
-          before: originalCode,
-          after: correctedCode,
-          reason: 'Update the variable type annotation from number to string to match the string ID literal.',
-        },
-      ];
-      explanation = 'Changing the type annotation to string preserves the intended user identifier value while satisfying TypeScript static type checking.';
-      confidence = 0.95;
-    } else {
-      originalCode = relevantLine;
-      correctedCode = relevantLine.replace(/:\s*number\b/, ': string');
-      changes = [
-        {
-          line: targetLine,
-          before: relevantLine,
-          after: correctedCode,
-          reason: 'Align type signature with the assigned value.',
-        },
-      ];
-      explanation = 'Aligning the declared type signature with the assignment prevents compile-time type errors.';
-    }
+    summary = 'Type mismatch: assigned value is not assignable to the declared type.';
+    rootCause =
+      'The variable or property is annotated with a specific type, but received a value of an incompatible type. In statically typed languages, values must match their declared type contracts.';
+    whyItHappens =
+      'TypeScript catches type discrepancies at compile time to prevent runtime errors and ensure interface contracts remain valid.';
+    explanation =
+      'Decide which side expresses the intent: change the assigned value so it matches the declared type, or change the annotation if the value is the intended representation. The rule engine does not guess between them.';
+    confidence = 0.6;
   }
   // 2. Undefined / Null property access (e.g. 2532)
-  else if (codeStr === '2532' || msgLower.includes('undefined') || msgLower.includes('null') || msgLower.includes('cannot read properties')) {
+  else if (
+    codeStr === '2532' ||
+    codeStr === '2531' ||
+    codeStr === '18048' ||
+    msgLower.includes('possibly undefined') ||
+    msgLower.includes('possibly null') ||
+    msgLower.includes('cannot read propert')
+  ) {
     errorType = 'TypeError';
     title = 'Undefined Property Access';
     summary = `Attempted property access on an object that is or may be undefined (${diagMsg}).`;
-    rootCause = `The target reference has not been verified to exist prior to dereferencing properties. In JavaScript/TypeScript, evaluating property access on null or undefined throws a runtime TypeError.`;
-    whyItHappens = `Runtime engines halt execution when attempting to look up keys on uninitialized or nullish object variables.`;
-
-    if (codeContext.includes('user.name') || relevantLine.includes('user.name')) {
-      originalCode = 'console.log(user.name);';
-      correctedCode = 'console.log(user?.name);';
-      changes = [
-        {
-          line: targetLine,
-          before: 'console.log(user.name);',
-          after: 'console.log(user?.name);',
-          reason: 'Use optional chaining (?.) so evaluating undefined results in undefined rather than a crash.',
-        },
-      ];
-      explanation = 'Using optional chaining (?.) safely evaluates nullish references without throwing an unhandled exception.';
-      confidence = 0.95;
-    } else {
-      originalCode = relevantLine;
-      correctedCode = relevantLine.replace(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/, '$1?.$2');
-      changes = [
-        {
-          line: targetLine,
-          before: originalCode,
-          after: correctedCode,
-          reason: 'Guard property dereferencing with optional chaining.',
-        },
-      ];
-      explanation = 'Guarding property access avoids runtime null-pointer crashes.';
-    }
+    rootCause =
+      'The target reference has not been verified to exist prior to dereferencing properties. In JavaScript/TypeScript, evaluating property access on null or undefined throws a runtime TypeError.';
+    whyItHappens =
+      'Runtime engines halt execution when attempting to look up keys on uninitialized or nullish object variables.';
+    explanation =
+      'Decide whether the value should be guaranteed before this line (validate it, default it, or narrow its type) or whether this access is optional. Optional chaining only hides a missing value; it is not always the correct fix.';
+    confidence = 0.55;
   }
   // 3. Undeclared Identifier / ReferenceError (e.g. 2304)
   else if (
@@ -582,54 +547,32 @@ function buildRuleBasedAnalysis({
     const varName = varMatch ? varMatch[1] : null;
 
     errorType = 'ReferenceError';
-    title = varName
-      ? `Cannot find name '${varName}'`
-      : 'Undefined identifier';
+    title = varName ? `Cannot find name '${varName}'` : 'Undefined identifier';
     summary = varName
       ? `Identifier '${varName}' is referenced but its intended value cannot be determined safely.`
       : 'An identifier may be undefined, but its name could not be identified reliably.';
     rootCause = 'The referenced identifier is not available in the current scope.';
     whyItHappens =
       'The identifier may be misspelled, missing an import, or intended to refer to a variable declared elsewhere.';
-
-    originalCode = relevantLine || diagMsg;
-    correctedCode = null;
-    changes = [];
-    status = 'needs_context';
     explanation =
-      'No automatic fix was applied because inventing a declaration or value could change program behavior. Check the identifier spelling, surrounding scope, and imports.';
-    confidence = 0.5;
+      'No automatic fix was generated because inventing a declaration or value could change program behavior. Check the identifier spelling, surrounding scope, and imports.';
   }
   // 4. Python / JS IndexError
-  else if (errorType === 'IndexError' || msgLower.includes('index out of range') || (relevantLine.includes('[10]') && relevantLine.includes('numbers'))) {
+  else if (errorType === 'IndexError' || msgLower.includes('index out of range')) {
     errorType = 'IndexError';
     title = 'List Index Out of Range';
     summary = 'Attempted to access an index outside collection boundaries.';
-    rootCause = 'The collection does not contain enough elements to satisfy the requested index. Indices are zero-based and must be strictly less than the length.';
-    whyItHappens = 'Indexing past the end of an array or list attempts to read non-existent memory elements.';
-
-    originalCode = relevantLine || 'print(numbers[10])';
-    if (language === 'python') {
-      correctedCode = `if len(numbers) > 10:\n    print(numbers[10])\nelse:\n    print("Index out of range")`;
-    } else {
-      correctedCode = `if (numbers.length > 10) {\n  console.log(numbers[10]);\n}`;
-    }
-    changes = [
-      {
-        line: targetLine,
-        before: originalCode,
-        after: correctedCode,
-        reason: 'Verify collection length before accessing the index.',
-      },
-    ];
-    explanation = 'Checking collection bounds before indexing prevents runtime IndexErrors.';
-    confidence = 0.9;
+    rootCause =
+      'The collection does not contain enough elements to satisfy the requested index. Indices are zero-based and must be strictly less than the length.';
+    whyItHappens =
+      'Indexing past the end of an array or list attempts to read non-existent memory elements.';
+    explanation =
+      'Verify the expected collection size and whether the index is correct. Guarding the access is only right when an out-of-range index is a valid state.';
+    confidence = 0.55;
   }
   // 5. Default generic rule
   else {
-    originalCode = relevantLine;
-    correctedCode = relevantLine;
-    explanation = `Inspect line ${targetLine} and align the statements with language syntax.`;
+    explanation = `Inspect line ${targetLine} and align the statements with language syntax. No automatic fix was generated.`;
   }
 
   const analysis = {

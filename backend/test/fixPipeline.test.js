@@ -63,10 +63,81 @@ describe('Context window line offsets', () => {
       language: 'typescript',
     });
 
-    assert.doesNotMatch(
-      String(analysis.originalCode),
-      /filler 101/,
+    assert.strictEqual(
+      analysis.originalCode,
+      '',
       'an out-of-window diagnostic must not be replaced with the first context line'
     );
+  });
+});
+
+describe('Rule engine never fabricates a patch', () => {
+  const analyze = (diagnostic, codeContext = 'let port: number = "8080";') =>
+    buildRuleBasedAnalysis({
+      mode: 'analyze_error',
+      file: { path: 'src/example.ts', language: 'typescript' },
+      diagnostic,
+      errorType: 'TypeError',
+      codeContext,
+      contextStartLine: 1,
+      contextEndLine: 1,
+      language: 'typescript',
+    });
+
+  test('type mismatch explains the choice instead of rewriting the annotation', () => {
+    const analysis = analyze({
+      severity: 'error',
+      message: "Type 'string' is not assignable to type 'number'.",
+      code: '2322',
+      startLine: 1,
+      startColumn: 5,
+      endLine: 1,
+      endColumn: 9,
+    });
+
+    assert.strictEqual(analysis.status, 'needs_context');
+    assert.strictEqual(analysis.correctedCode, null);
+    assert.deepStrictEqual(analysis.changes, []);
+    assert.doesNotMatch(JSON.stringify(analysis), /user_42/);
+    assert.doesNotMatch(JSON.stringify(analysis), /: string/);
+  });
+
+  test('null access does not blindly insert optional chaining', () => {
+    const analysis = analyze(
+      {
+        severity: 'error',
+        message: "Object is possibly 'undefined'.",
+        code: '2532',
+        startLine: 1,
+        startColumn: 1,
+        endLine: 1,
+        endColumn: 10,
+      },
+      'const result = user.name;'
+    );
+
+    assert.strictEqual(analysis.status, 'needs_context');
+    assert.strictEqual(analysis.correctedCode, null);
+    assert.deepStrictEqual(analysis.changes, []);
+    assert.doesNotMatch(JSON.stringify(analysis), /\?\./);
+  });
+
+  test('index error does not emit a hardcoded bounds guard', () => {
+    const analysis = analyze(
+      {
+        severity: 'error',
+        message: 'list index out of range',
+        code: 'IndexError',
+        startLine: 1,
+        startColumn: 1,
+        endLine: 1,
+        endColumn: 10,
+      },
+      'print(numbers[10])'
+    );
+
+    assert.strictEqual(analysis.status, 'needs_context');
+    assert.strictEqual(analysis.correctedCode, null);
+    assert.deepStrictEqual(analysis.changes, []);
   });
 });
