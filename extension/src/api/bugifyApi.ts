@@ -6,6 +6,7 @@
 
 import * as vscode from 'vscode';
 import { AnalyzeRequest, AnalysisResult } from '../types/bugify';
+import { buildAnalyzeCacheKey } from './cacheKey';
 
 export class BugifyApiClient {
   private cache = new Map<string, AnalysisResult>();
@@ -22,16 +23,6 @@ export class BugifyApiClient {
   }
 
   /**
-   * Generates a deterministic cache key for identical requests.
-   */
-  private generateCacheKey(payload: AnalyzeRequest): string {
-    const diag = payload.diagnostics?.[0];
-    const diagKey = diag ? `${diag.code || ''}:${diag.message}:${diag.startLine}` : 'none';
-    const contextSample = payload.codeContext.slice(0, 100);
-    return `${payload.mode}:${payload.detail}:${payload.file.path}:${payload.cursor?.line || 0}:${diagKey}:${contextSample}`;
-  }
-
-  /**
    * Clears the in-memory analysis cache.
    */
   public clearCache(): void {
@@ -45,7 +36,7 @@ export class BugifyApiClient {
     payload: AnalyzeRequest,
     forceRefresh = false
   ): Promise<{ result?: AnalysisResult; error?: string; isBackendUnreachable?: boolean }> {
-    const cacheKey = this.generateCacheKey(payload);
+    const cacheKey = buildAnalyzeCacheKey(payload);
 
     if (!forceRefresh && this.cache.has(cacheKey)) {
       return { result: this.cache.get(cacheKey) };

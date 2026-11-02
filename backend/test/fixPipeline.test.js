@@ -2,7 +2,7 @@
 // Regression tests for the extension fix pipeline's context handling.
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
-const { buildRuleBasedAnalysis } = require('../src/services/aiExplanationService');
+const { buildRuleBasedAnalysis, validateModelChanges } = require('../src/services/aiExplanationService');
 const { validateFix } = require('../src/services/validationService');
 
 describe('Context window line offsets', () => {
@@ -184,5 +184,58 @@ describe('Validation never reports parse-only checks as validated', () => {
     });
 
     assert.strictEqual(result.status, 'validation_failed');
+  });
+});
+
+describe('Model-proposed changes must be applicable', () => {
+  const windowText = [
+    '// line 101',
+    '// line 102',
+    '// line 103',
+    'let port: number = "8080";',
+    '// line 105',
+  ].join('\n');
+  const windowStart = 101;
+
+  test('accepts a change whose text and line are inside the window', () => {
+    const result = validateModelChanges(
+      [{ line: 104, before: 'let port: number = "8080";', after: 'let port = "8080";', reason: 'r' }],
+      windowText,
+      windowStart
+    );
+
+    assert.strictEqual(result.error, undefined);
+    assert.strictEqual(result.changes.length, 1);
+    assert.strictEqual(result.changes[0].line, 104);
+  });
+
+  test('rejects a change whose original text is absent from the window', () => {
+    const result = validateModelChanges(
+      [{ line: 104, before: 'let userId: string = "user_42";', after: 'let userId = "user_42";' }],
+      windowText,
+      windowStart
+    );
+
+    assert.match(result.error, /not present/);
+  });
+
+  test('rejects a change outside the analysed line window', () => {
+    const result = validateModelChanges(
+      [{ line: 1, before: 'let port: number = "8080";', after: 'let port = "8080";' }],
+      windowText,
+      windowStart
+    );
+
+    assert.match(result.error, /outside the analysed window/);
+  });
+
+  test('rejects no-op changes', () => {
+    const result = validateModelChanges(
+      [{ line: 104, before: 'let port: number = "8080";', after: 'let port: number = "8080";' }],
+      windowText,
+      windowStart
+    );
+
+    assert.match(result.error, /no-op/);
   });
 });

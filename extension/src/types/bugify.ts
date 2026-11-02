@@ -63,6 +63,7 @@ export interface AnalyzeRequest {
   codeContext: string;
   contextStartLine?: number;
   contextEndLine?: number;
+  documentVersion?: number;
   functionContext?: string;
   imports?: string;
   dependencies?: Record<string, string>;

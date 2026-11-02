@@ -145,6 +145,7 @@ export async function collectDocumentContext(
     codeContext: redactedCodeContext,
     contextStartLine: windowResult.startLine,
     contextEndLine: windowResult.endLine,
+    documentVersion: document.version,
     functionContext: redactedFunctionContext,
     imports: redactedImports,
     dependencies,

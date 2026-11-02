@@ -28,7 +28,8 @@ Rules:
   "suggestion": "Specific, actionable guidance on what the developer should check or change.",
   "correctedCode": "The corrected version of the code snippet that fixes the bug while preserving the user's logic."
 }`;
-const AI_TIMEOUT_MS = 15000;
+const AI_TIMEOUT_MS = 12000;
+const MAX_AI_ATTEMPTS = 1;
 
 async function fetchWithTimeout(url, options = {}) {
   const controller = new AbortController();
@@ -630,6 +631,48 @@ function cleanAndParseJson(rawText) {
 /**
  * Service to analyze VS Code extension diagnostics with AI, falling back to rules.
  */
+/**
+ * Rejects model-proposed changes that cannot be applied verbatim to the code window.
+ * A patch whose "before" text is absent or outside the window is not a fix; it is a guess.
+ */
+function validateModelChanges(changes, codeContext, windowStartLine) {
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return { changes: [] };
+  }
+
+  const contextLines = (codeContext || '').split(/\r?\n/);
+  const windowEndLine = windowStartLine + contextLines.length - 1;
+  const accepted = [];
+
+  for (const change of changes) {
+    if (!change || typeof change.before !== 'string' || change.before.length === 0) {
+      return { error: 'The model proposed a change without verbatim original text.' };
+    }
+    if (typeof change.after !== 'string' || change.after === change.before) {
+      return { error: 'The model proposed a no-op or malformed change.' };
+    }
+
+    const line = Number(change.line);
+    if (!Number.isInteger(line) || line < windowStartLine || line > windowEndLine) {
+      return { error: `The model proposed a change on line ${change.line}, outside the analysed window.` };
+    }
+
+    const targetText = contextLines[line - windowStartLine] || '';
+    if (!targetText.includes(change.before) && !codeContext.includes(change.before)) {
+      return { error: 'The model proposed a change whose original text is not present in the code window.' };
+    }
+
+    accepted.push({
+      line,
+      before: change.before,
+      after: change.after,
+      reason: String(change.reason || ''),
+    });
+  }
+
+  return { changes: accepted };
+}
+
 async function explainExtensionDiagnostic({
   mode,
   detail = 'normal',
@@ -782,7 +825,7 @@ Return ONLY valid JSON matching this schema:
 }`;
 
   let attempts = 0;
-  while (attempts < 2) {
+  while (attempts < MAX_AI_ATTEMPTS) {
     attempts++;
     try {
       let rawResult;
@@ -809,18 +852,43 @@ Return ONLY valid JSON matching this schema:
         });
       }
       if (rawResult && rawResult.summary && (rawResult.rootCause || rawResult.cause)) {
-        const correctedCode = rawResult.correctedCode ? String(rawResult.correctedCode) : null;
-        const originalCode = rawResult.originalCode ? String(rawResult.originalCode) : '';
-        const status = rawResult.status || (correctedCode ? 'fixed' : 'needs_context');
+        let correctedCode = rawResult.correctedCode ? String(rawResult.correctedCode) : null;
+        let originalCode = rawResult.originalCode ? String(rawResult.originalCode) : '';
+        let status = rawResult.status || (correctedCode ? 'fixed' : 'needs_context');
 
-        // Run validation pipeline on generated fix
-        const validation = validateFix({
-          language: lang,
-          originalCode,
-          correctedCode,
-          status,
-          diagnostic: primaryDiag,
-        });
+        const changesCheck = validateModelChanges(
+          rawResult.changes,
+          safeCodeContext,
+          windowStartLine
+        );
+        const originalTextInWindow =
+          !originalCode || safeCodeContext.includes(originalCode.trim());
+
+        let withheldReason = null;
+        if (changesCheck.error) {
+          withheldReason = changesCheck.error;
+        } else if (correctedCode && !originalTextInWindow) {
+          withheldReason =
+            'The model proposed a fix whose original text is not present in the code window.';
+        } else if (status === 'fixed' && !correctedCode && changesCheck.changes.length === 0) {
+          withheldReason = 'The model reported a fix without any applicable change.';
+        }
+
+        if (withheldReason) {
+          status = 'needs_context';
+          correctedCode = null;
+          originalCode = '';
+        }
+
+        const validation = withheldReason
+          ? { status: 'needs_context', message: withheldReason, checkerUsed: 'patch-validator' }
+          : validateFix({
+              language: lang,
+              originalCode,
+              correctedCode,
+              status,
+              diagnostic: primaryDiag,
+            });
 
         return {
           analysisSource: 'ai',
@@ -840,7 +908,7 @@ Return ONLY valid JSON matching this schema:
           whyItHappens: String(rawResult.whyItHappens || rawResult.explanation || ''),
           originalCode,
           correctedCode,
-          changes: Array.isArray(rawResult.changes) ? rawResult.changes : [],
+          changes: withheldReason ? [] : changesCheck.changes,
           explanation: String(rawResult.explanation || ''),
           confidence: typeof rawResult.confidence === 'number' ? rawResult.confidence : 0.9,
           severity,
@@ -878,5 +946,6 @@ module.exports = {
   generateHeuristicExplanation,
   explainExtensionDiagnostic,
   buildRuleBasedAnalysis,
+  validateModelChanges,
 };
 
