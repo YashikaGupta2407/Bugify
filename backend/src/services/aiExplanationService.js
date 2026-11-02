@@ -564,30 +564,36 @@ function buildRuleBasedAnalysis({
     }
   }
   // 3. Undeclared Identifier / ReferenceError (e.g. 2304)
-  else if (codeStr === '2304' || msgLower.includes('cannot find name') || errorType === 'ReferenceError' || errorType === 'NameError') {
+  else if (
+    codeStr === '2304' ||
+    msgLower.includes('cannot find name') ||
+    errorType === 'ReferenceError' ||
+    errorType === 'NameError'
+  ) {
     const varMatch =
-      diagMsg.match(/['"]([^'"]+)['"]/) ||
-      diagMsg.match(/^(\w+)\s+is not defined/i) ||
-      (relevantLine ? relevantLine.match(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/) : null);
-    const varName = varMatch ? varMatch[1] : 'identifier';
-    errorType = 'ReferenceError';
-    title = `Cannot find name '${varName}'`;
-    summary = `Identifier '${varName}' is referenced before declaration or import.`;
-    rootCause = `The symbol '${varName}' does not exist in the current lexical scope or top-level module imports.`;
-    whyItHappens = `The runtime environment cannot resolve the memory location of an identifier that has not been bound in scope.`;
+      diagMsg.match(/Cannot find name ['"]([^'"]+)['"]/i) ||
+      diagMsg.match(/['"]([^'"]+)['"] is not defined/i);
 
-    originalCode = relevantLine || `console.log(${varName});`;
-    correctedCode = `const ${varName} = "";\n${originalCode}`;
-    changes = [
-      {
-        line: targetLine,
-        before: originalCode,
-        after: correctedCode,
-        reason: `Declare '${varName}' in scope before referencing it.`,
-      },
-    ];
-    explanation = `Declaring the variable in scope creates the required binding and allows the statement to execute safely.`;
-    confidence = 0.9;
+    const varName = varMatch ? varMatch[1] : null;
+
+    errorType = 'ReferenceError';
+    title = varName
+      ? `Cannot find name '${varName}'`
+      : 'Undefined identifier';
+    summary = varName
+      ? `Identifier '${varName}' is referenced but its intended value cannot be determined safely.`
+      : 'An identifier may be undefined, but its name could not be identified reliably.';
+    rootCause = 'The referenced identifier is not available in the current scope.';
+    whyItHappens =
+      'The identifier may be misspelled, missing an import, or intended to refer to a variable declared elsewhere.';
+
+    originalCode = relevantLine || diagMsg;
+    correctedCode = null;
+    changes = [];
+    status = 'needs_context';
+    explanation =
+      'No automatic fix was applied because inventing a declaration or value could change program behavior. Check the identifier spelling, surrounding scope, and imports.';
+    confidence = 0.5;
   }
   // 4. Python / JS IndexError
   else if (errorType === 'IndexError' || msgLower.includes('index out of range') || (relevantLine.includes('[10]') && relevantLine.includes('numbers'))) {
