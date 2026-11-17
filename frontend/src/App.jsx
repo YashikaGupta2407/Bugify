@@ -159,8 +159,11 @@ function App() {
       {/* Navigation / Header */}
       <header className="navbar">
         <div className="nav-brand">
-          <h1>BUGIFY</h1>
-          <span className="nav-tagline">AI-Powered Code Debugging & Error Understanding</span>
+          <img className="nav-logo" src="/bugify-logo.png" alt="" aria-hidden="true" />
+          <div className="nav-brand-meta">
+            <h1>BUGIFY</h1>
+            <span className="nav-tagline">AI-Powered Code Debugging & Error Understanding</span>
+          </div>
         </div>
         <div className="nav-actions">
           <button

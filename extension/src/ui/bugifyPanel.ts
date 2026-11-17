@@ -1330,11 +1330,17 @@ export class BugifyPanel {
 
         const aiNotice = aiError
           ? `
-            <div class="state-box state-error" role="alert" style="margin-bottom: 8px;">
-              <div class="state-title">ANALYSIS SERVICE NOTICE</div>
+            <aside class="analysis-offline-notice state-box state-error" role="alert">
+              <div class="analysis-notice-heading">
+                <span class="analysis-notice-icon" aria-hidden="true">!</span>
+                <div class="analysis-notice-title-group">
+                  <div class="state-title">AI ANALYSIS UNAVAILABLE</div>
+                  <div class="analysis-notice-caption">Local diagnostics remain available.</div>
+                </div>
+              </div>
               <div class="state-desc">${this.escapeHtml(aiError)}</div>
               ${canRetry ? '<button type="button" class="btn btn-secondary btn-xs" id="retryBtn">RETRY</button>' : ''}
-            </div>
+            </aside>
           `
           : '';
 
@@ -1516,18 +1522,14 @@ export class BugifyPanel {
   <nav class="mode-bar" aria-label="View mode">
     <div class="mode-tablist" role="tablist">
       <button type="button" role="tab" aria-selected="${viewMode === 'workspace'}" class="mode-tab-btn ${viewMode === 'workspace' ? 'active' : ''}" id="tabWorkspace">
-        WORKSPACE
-        <span class="tab-pill-count">${totalWorkspaceActionable < 10 ? `0${totalWorkspaceActionable}` : totalWorkspaceActionable}</span>
+        WORKSPACE <span class="tab-pill-count">${totalWorkspaceActionable < 10 ? `0${totalWorkspaceActionable}` : totalWorkspaceActionable}</span>
       </button>
       <button type="button" role="tab" aria-selected="${viewMode === 'current_file'}" class="mode-tab-btn ${viewMode === 'current_file' ? 'active' : ''}" id="tabCurrentFile">
-        CURRENT FILE
-        <span class="tab-pill-count">${activeCount < 10 ? `0${activeCount}` : activeCount}</span>
+        CURRENT FILE <span class="tab-pill-count">${activeCount < 10 ? `0${activeCount}` : activeCount}</span>
       </button>
     </div>
     <div class="mode-actions">
-      <button type="button" class="btn btn-secondary btn-xs" id="actionScanWorkspace">
-        ${isScanningWorkspace ? 'SCANNING...' : 'SCAN WORKSPACE'}
-      </button>
+      <button type="button" class="btn btn-secondary btn-xs" id="actionScanWorkspace">${isScanningWorkspace ? 'SCANNING...' : 'SCAN WORKSPACE'}</button>
     </div>
   </nav>
 
