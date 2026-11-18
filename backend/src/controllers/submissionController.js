@@ -76,19 +76,22 @@ async function createSubmission(req, res, next) {
       });
     } catch (execError) {
       console.error('Code execution service failure:', execError);
-      return res.status(503).json({
-        success: false,
-        message: 'Unable to execute code',
-      });
+      rawExecution = {
+        status: 'PROVIDER_ERROR', isInfrastructureFailure: true,
+        message: 'Unable to contact the execution provider.',
+        stdout: null, stderr: null, compileOutput: null, executionTime: 0, memory: null,
+      };
     }
 
     // 4. Classify execution result into Bugify categories
     const classified = classifyResult(rawExecution);
     const isSuccess = classified.status === 'success';
+    const isInfrastructureFailure = classified.isInfrastructureFailure === true ||
+      ['PROVIDER_ERROR', 'PENDING', 'TIMEOUT'].includes(classified.status);
 
     // 5. Generate AI Explanation for errors only (never for clean success)
     let aiExplanation = null;
-    if (!isSuccess && classified.errorType) {
+    if (!isInfrastructureFailure && !isSuccess && classified.errorType) {
       try {
         aiExplanation = await generateExplanation({
           language: normalizedLanguage,
@@ -148,25 +151,27 @@ async function createSubmission(req, res, next) {
       }
 
       // Update UserProgress statistics
-      const progressUpdate = {
-        totalSubmissions: { increment: 1 },
-      };
-      if (isSuccess) {
-        progressUpdate.successfulSubmissions = { increment: 1 };
-      } else {
-        progressUpdate.failedSubmissions = { increment: 1 };
-      }
+      if (!isInfrastructureFailure) {
+        const progressUpdate = {
+          totalSubmissions: { increment: 1 },
+        };
+        if (isSuccess) {
+          progressUpdate.successfulSubmissions = { increment: 1 };
+        } else {
+          progressUpdate.failedSubmissions = { increment: 1 };
+        }
 
-      await tx.userProgress.upsert({
-        where: { userId: demoUser.id },
-        create: {
-          userId: demoUser.id,
-          totalSubmissions: 1,
-          successfulSubmissions: isSuccess ? 1 : 0,
-          failedSubmissions: isSuccess ? 0 : 1,
-        },
-        update: progressUpdate,
-      });
+        await tx.userProgress.upsert({
+          where: { userId: demoUser.id },
+          create: {
+            userId: demoUser.id,
+            totalSubmissions: 1,
+            successfulSubmissions: isSuccess ? 1 : 0,
+            failedSubmissions: isSuccess ? 0 : 1,
+          },
+          update: progressUpdate,
+        });
+      }
 
       return {
         submissionId: submission.id,
@@ -191,6 +196,7 @@ async function createSubmission(req, res, next) {
       success: true,
       result: {
         status: transactionResult.status,
+        isInfrastructureFailure,
         errorType: transactionResult.errorType,
         errorMessage: transactionResult.errorMessage,
         output: transactionResult.output,
@@ -239,6 +245,7 @@ async function getSubmissions(req, res, next) {
       language: sub.language.name,
       errorType: sub.result?.errorType || null,
       status: sub.result?.status || 'unknown',
+      isInfrastructureFailure: ['PROVIDER_ERROR', 'PENDING', 'TIMEOUT'].includes(sub.result?.status),
       createdAt: sub.createdAt,
     }));
 
@@ -291,6 +298,7 @@ async function getSubmissionById(req, res, next) {
       },
       result: submission.result ? {
         status: submission.result.status,
+        isInfrastructureFailure: ['PROVIDER_ERROR', 'PENDING', 'TIMEOUT'].includes(submission.result.status),
         errorType: submission.result.errorType,
         errorMessage: submission.result.errorMessage,
         output: submission.result.output,

@@ -55,52 +55,77 @@ async function executeCode({ code, language, stdin = '' }) {
     wall_time_limit: 10,
   };
 
-  const submitUrl = `${baseUrl}/submissions?wait=true`;
-  const response = await fetch(submitUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Judge0 API request failed with status ${response.status}: ${errorBody}`);
-  }
-
-  let data = await response.json();
-
-  // If status is in queue (id 1) or processing (id 2), poll until completed
-  if (data.token && (data.status?.id === 1 || data.status?.id === 2)) {
-    const token = data.token;
-    const maxPollAttempts = 10;
-    const pollIntervalMs = 800;
-
-    for (let attempt = 0; attempt < maxPollAttempts; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
-      const pollResponse = await fetch(`${baseUrl}/submissions/${token}`, {
-        headers,
-      });
-
-      if (pollResponse.ok) {
-        data = await pollResponse.json();
-        if (data.status?.id !== 1 && data.status?.id !== 2) {
-          break;
-        }
-      }
+  function validateResponse(data) {
+    if (!data || typeof data !== 'object' || !Number.isInteger(data.status?.id) || data.status.id < 1 || data.status.id > 14) {
+      throw new Error('Execution provider returned a malformed or unknown response.');
+    }
+    for (const key of ['stdout', 'stderr', 'compile_output', 'message']) {
+      if (data[key] != null && typeof data[key] !== 'string') throw new Error('Execution provider returned an invalid output field.');
+    }
+    for (const key of ['time', 'memory']) {
+      if (data[key] != null && !Number.isFinite(Number(data[key]))) throw new Error('Execution provider returned an invalid numeric field.');
     }
   }
 
-  // Normalize into standard Bugify execution format
-  return {
-    status: data.status?.description || 'Unknown',
-    statusId: data.status?.id || null,
-    stdout: data.stdout || null,
-    stderr: data.stderr || null,
-    compileOutput: data.compile_output || null,
-    message: data.message || null,
-    executionTime: data.time ? parseFloat(data.time) : 0,
-    memory: data.memory ? parseFloat(data.memory) : null,
-  };
+  try {
+    const submitUrl = `${baseUrl}/submissions?wait=true`;
+    const response = await fetch(submitUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Judge0 API request failed with status ${response.status}`);
+    }
+
+    let data = await response.json();
+    validateResponse(data);
+
+    // If status is in queue (id 1) or processing (id 2), poll until completed
+    if (data.token && (data.status?.id === 1 || data.status?.id === 2)) {
+      const token = data.token;
+      const maxPollAttempts = 10;
+      const pollIntervalMs = 800;
+
+      for (let attempt = 0; attempt < maxPollAttempts; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+        const pollResponse = await fetch(`${baseUrl}/submissions/${token}`, {
+          headers,
+        });
+
+        if (!pollResponse.ok) throw new Error(`Judge0 polling request failed with status ${pollResponse.status}`);
+        if (pollResponse.ok) {
+          data = await pollResponse.json();
+          validateResponse(data);
+          if (data.status?.id !== 1 && data.status?.id !== 2) {
+            break;
+          }
+        }
+      }
+    }
+
+    if (data.status.id === 1 || data.status.id === 2) {
+      return { status: 'TIMEOUT', statusId: data.status.id, isInfrastructureFailure: true,
+        message: 'Execution polling budget exhausted while the provider was still processing.',
+        stdout: null, stderr: null, compileOutput: null, executionTime: 0, memory: null };
+    }
+
+    // Normalize into standard Bugify execution format
+    return {
+      status: data.status?.description || 'Unknown',
+      statusId: data.status?.id || null,
+      stdout: data.stdout || null,
+      stderr: data.stderr || null,
+      compileOutput: data.compile_output || null,
+      message: data.message || null,
+      executionTime: data.time ? parseFloat(data.time) : 0,
+      memory: data.memory ? parseFloat(data.memory) : null,
+    };
+  } catch (error) {
+    return { status: 'PROVIDER_ERROR', isInfrastructureFailure: true, message: error.message,
+      stdout: null, stderr: null, compileOutput: null, executionTime: 0, memory: null };
+  }
 }
 
 module.exports = {

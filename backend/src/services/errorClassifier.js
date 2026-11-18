@@ -47,6 +47,17 @@ const ErrorTypes = {
  * @returns {Object} Classified result
  */
 function classifyResult(executionResult) {
+  const infrastructure = (status, errorMessage) => ({
+    status,
+    isInfrastructureFailure: true,
+    errorType: null,
+    errorMessage,
+    output: '',
+    executionTime: 0,
+  });
+  if (!executionResult || typeof executionResult !== 'object' || Array.isArray(executionResult)) {
+    return infrastructure('PROVIDER_ERROR', 'Execution provider returned a malformed response.');
+  }
   const {
     status: externalStatus,
     statusId,
@@ -56,6 +67,20 @@ function classifyResult(executionResult) {
     message,
     executionTime = 0,
   } = executionResult;
+
+  if ([externalStatus, stdout, stderr, compileOutput, message].some(value => value != null && typeof value !== 'string')) {
+    return infrastructure('PROVIDER_ERROR', 'Execution provider returned malformed result fields.');
+  }
+
+  if (['PROVIDER_ERROR', 'PENDING', 'TIMEOUT'].includes(externalStatus)) {
+    return infrastructure(externalStatus, message || 'Execution provider did not return a completed code result.');
+  }
+  if (!Number.isInteger(statusId) || statusId < 1 || statusId > 12) {
+    return infrastructure('PROVIDER_ERROR', message || 'Execution provider returned an unknown or internal error status.');
+  }
+  if (statusId === 1 || statusId === 2) {
+    return infrastructure('PENDING', 'Execution is still queued or processing.');
+  }
 
   // 1. Time Limit Exceeded (Judge0 status 5)
   if (
@@ -212,13 +237,9 @@ function classifyResult(executionResult) {
     };
   }
 
-  // Default success if no errors detected
+  // Success requires the explicit accepted-status branch above.
   return {
-    status: 'success',
-    errorType: null,
-    errorMessage: null,
-    output: stdout || '',
-    executionTime,
+    ...infrastructure('PROVIDER_ERROR', 'Execution provider did not return a recognizable terminal result.'),
   };
 }
 

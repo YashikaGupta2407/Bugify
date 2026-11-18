@@ -6,6 +6,12 @@ const DEFAULT_PYTHON_CODE = `def divide(a, b):
 
 print(divide(10, 0))`;
 
+const INFRASTRUCTURE_LABELS = {
+  PROVIDER_ERROR: 'Execution provider error',
+  PENDING: 'Execution pending',
+  TIMEOUT: 'Execution polling timed out',
+};
+
 function App() {
   const [language, setLanguage] = useState('python');
   const [code, setCode] = useState(DEFAULT_PYTHON_CODE);
@@ -82,7 +88,11 @@ function App() {
       setResult(data.result);
       setExplanation(data.explanation || null);
 
-      if (data.result.status === 'success') {
+      if (INFRASTRUCTURE_LABELS[data.result.status]) {
+        setExplanation(null);
+        setErrorMessage(`${INFRASTRUCTURE_LABELS[data.result.status]}. ${data.result.errorMessage || 'No completed code result is available. Try again later.'}`);
+        setExecutionState('api_error');
+      } else if (data.result.status === 'success') {
         setExecutionState('success');
       } else {
         setExecutionState('error');
@@ -115,7 +125,11 @@ function App() {
         setActiveHistoryId(id);
         setShowHistory(false);
 
-        if (data.result?.status === 'success') {
+        if (INFRASTRUCTURE_LABELS[data.result?.status]) {
+          setExplanation(null);
+          setErrorMessage(`${INFRASTRUCTURE_LABELS[data.result.status]}. ${data.result.errorMessage || 'This attempt did not produce a completed code result.'}`);
+          setExecutionState('api_error');
+        } else if (data.result?.status === 'success') {
           setExecutionState('success');
         } else {
           setExecutionState('error');
@@ -277,7 +291,7 @@ function App() {
             {/* API / Network Error */}
             {executionState === 'api_error' && (
               <div className="alert-card error-alert" id="api-error-card">
-                <strong>✕ Error Notice</strong>
+                <strong>{INFRASTRUCTURE_LABELS[result?.status] ? 'Execution Service Notice' : '✕ Error Notice'}</strong>
                 <p>{errorMessage}</p>
               </div>
             )}
@@ -417,8 +431,8 @@ function App() {
                   onClick={() => handleSelectHistoryItem(item.id)}
                 >
                   <div className="item-top">
-                    <span className={item.status === 'success' ? 'badge-success-mini' : 'badge-error-mini'}>
-                      {item.status === 'success' ? '✓ SUCCESS' : `🔴 ${item.errorType || 'ERROR'}`}
+                    <span className={INFRASTRUCTURE_LABELS[item.status] ? undefined : item.status === 'success' ? 'badge-success-mini' : 'badge-error-mini'}>
+                      {INFRASTRUCTURE_LABELS[item.status] || (item.status === 'success' ? '✓ SUCCESS' : `🔴 ${item.errorType || 'ERROR'}`)}
                     </span>
                     <span className="item-id">#{item.id}</span>
                   </div>
