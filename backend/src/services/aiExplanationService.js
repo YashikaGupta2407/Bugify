@@ -40,44 +40,27 @@ function generateHeuristicExplanation({ code, errorType, errorMessage, stderr })
     case 'ZERO_DIVISION_ERROR': {
       // Find line with division
       const divLine = lines.find((l) => l.includes('/') || l.includes('%')) || 'Division statement';
-      let corrected = cleanCode;
-      if (cleanCode.includes('def divide(a, b):')) {
-        corrected = `def divide(a, b):
-    if b == 0:
-        return "Cannot divide by zero"
-    return a / b
-
-print(divide(10, 0))`;
-      } else if (cleanCode.includes('/ 0') || cleanCode.includes('/0')) {
-        corrected = cleanCode.replace(/\/\s*0(?![0-9])/, '/ 1');
-      }
-
       return {
         summary: 'The program attempted to divide a number by zero.',
         cause: 'A division operation was executed where the denominator (divisor) evaluated to zero.',
         location: divLine.trim(),
         explanation: 'In mathematics and programming, division by zero is undefined. Python raises a ZeroDivisionError whenever a division (/) or modulo (%) operator receives zero as its second operand.',
         suggestion: 'Add a conditional check before dividing to ensure the divisor is not zero (e.g., check if divisor == 0), or provide a safe default value.',
-        correctedCode: corrected,
+        status: 'NEEDS_CONTEXT',
+        correctedCode: null,
       };
     }
 
     case 'INDEX_ERROR': {
       const idxLine = lines.find((l) => l.includes('[') && l.includes(']')) || 'Array/list index access';
-      let corrected = cleanCode;
-      if (cleanCode.includes('[10]') && cleanCode.includes('[1, 2, 3]')) {
-        corrected = cleanCode.replace('[10]', '[len(numbers) - 1]');
-      } else {
-        corrected = `# Ensure index is within 0 <= index < len(list)\n${cleanCode}`;
-      }
-
       return {
         summary: 'The program attempted to access an element outside the boundaries of a list.',
         cause: 'The requested index does not exist in the collection because the list contains fewer items than the index requested.',
         location: idxLine.trim(),
         explanation: 'Python lists use zero-based indexing. For a list of length N, valid indices range from 0 to N-1 (or -N to -1 for reverse indexing). Accessing any index >= N raises an IndexError.',
         suggestion: 'Verify the length of the list using len() before accessing elements, or ensure your loop/index variables stay strictly within bounds.',
-        correctedCode: corrected,
+        status: 'NEEDS_CONTEXT',
+        correctedCode: null,
       };
     }
 
@@ -87,52 +70,40 @@ print(divide(10, 0))`;
       const varName = varMatch ? varMatch[1] : 'variable';
       const nameLine = lines.find((l) => l.includes(varName)) || `Reference to '${varName}'`;
 
-      let corrected = cleanCode;
-      if (varMatch) {
-        corrected = `${varName} = "Default Value"\n${cleanCode}`;
-      }
-
       return {
         summary: `The variable or function '${varName}' was referenced before being defined.`,
         cause: `Python encountered the identifier '${varName}', but could not find a local or global definition for it.`,
         location: nameLine.trim(),
         explanation: 'Before using any variable or calling a function in Python, it must first be declared and assigned a value. If an identifier is misspelled or referenced before its assignment, Python raises a NameError.',
         suggestion: `Check the spelling of '${varName}' and ensure it is assigned a value above this line or properly passed as an argument.`,
-        correctedCode: corrected,
+        status: 'NEEDS_CONTEXT',
+        correctedCode: null,
       };
     }
 
     case 'TYPE_ERROR': {
       const typeLine = lines.find((l) => l.includes('+') || l.includes('(')) || 'Operation with incompatible types';
-      let corrected = cleanCode;
-      if (cleanCode.includes('"20"') || cleanCode.includes("'20'")) {
-        corrected = cleanCode.replace(/"20"/g, 'int("20")').replace(/'20'/g, "int('20')");
-      }
-
       return {
         summary: 'An operation was performed on values of incompatible types.',
         cause: errorMessage || 'An operator or function received arguments of unexpected types (such as combining a string with an integer).',
         location: typeLine.trim(),
         explanation: 'Python is strongly typed and will not automatically convert incompatible types like strings and integers during operations like addition (+). Combining them directly raises a TypeError.',
         suggestion: 'Explicitly convert values to the matching type before combining them (for example, use int() for numbers or str() for text representation).',
-        correctedCode: corrected,
+        status: 'NEEDS_CONTEXT',
+        correctedCode: null,
       };
     }
 
     case 'SYNTAX_ERROR': {
       const synLine = lines[0] || 'Statement with missing syntax';
-      let corrected = cleanCode;
-      if (cleanCode.includes('if True\n') || cleanCode.includes('if True:')) {
-        corrected = cleanCode.replace(/if True(?!\:)/, 'if True:');
-      }
-
       return {
         summary: 'Python could not parse the code due to incorrect syntax.',
         cause: errorMessage || 'A required syntax character (such as a colon :) or parenthesis was omitted.',
         location: synLine.trim(),
         explanation: 'Python requires specific grammatical rules, such as ending compound statements (if, for, while, def, class) with a colon (:) and properly indenting code blocks.',
         suggestion: 'Review the flagged line for missing colons, unmatched quotes, or unclosed parentheses.',
-        correctedCode: corrected,
+        status: 'NEEDS_CONTEXT',
+        correctedCode: null,
       };
     }
 
@@ -143,7 +114,8 @@ print(divide(10, 0))`;
         location: 'Loop or recursive construct',
         explanation: 'When a loop condition never becomes False, or when recursion has no terminating base case, the program runs endlessly until terminated by the execution sandbox.',
         suggestion: 'Ensure your while/for loop has an update statement that eventually terminates the condition, or verify your recursive base case.',
-        correctedCode: cleanCode,
+        status: 'NEEDS_CONTEXT',
+        correctedCode: null,
       };
     }
 
@@ -154,7 +126,8 @@ print(divide(10, 0))`;
         location: 'Could not be determined precisely',
         explanation: 'An unhandled exception was raised by Python during the execution of this code.',
         suggestion: 'Inspect the error message and the surrounding statements to ensure all values and conditions are valid.',
-        correctedCode: cleanCode,
+        status: 'NEEDS_CONTEXT',
+        correctedCode: null,
       };
     }
   }
@@ -425,132 +398,32 @@ function buildRuleBasedAnalysis({
   const codeStr = String(primaryDiag?.code || '');
   const msgLower = diagMsg.toLowerCase();
 
-  // 1. TypeScript Type Mismatch (e.g. 2322)
+  // Without enough information about intent, explain rather than invent values,
+  // identifiers, access expressions, or a replacement in another language.
   if (codeStr === '2322' || msgLower.includes('not assignable to type')) {
     title = 'Type Mismatch';
-    summary = `Type mismatch: assigned value is not assignable to the declared type.`;
-    rootCause = `The variable or property is annotated with a specific type, but received a value of an incompatible type. In statically typed languages, values must match their declared type contracts.`;
-    whyItHappens = `TypeScript catches type discrepancies at compile time to prevent runtime errors and ensure interface contracts remain valid.`;
-    
-    // Check if user is assigning string to number e.g. let userId: number = "user_42"
-    if (codeContext.includes('let userId: number = "user_42"') || (relevantLine.includes('number') && relevantLine.includes('"'))) {
-      originalCode = relevantLine || 'let userId: number = "user_42";';
-      correctedCode = 'let userId: string = "user_42";';
-      changes = [
-        {
-          line: targetLine,
-          before: originalCode,
-          after: correctedCode,
-          reason: 'Update the variable type annotation from number to string to match the string ID literal.',
-        },
-      ];
-      explanation = 'Changing the type annotation to string preserves the intended user identifier value while satisfying TypeScript static type checking.';
-      confidence = 0.95;
-    } else {
-      originalCode = relevantLine;
-      correctedCode = relevantLine.replace(/:\s*number\b/, ': string');
-      changes = [
-        {
-          line: targetLine,
-          before: relevantLine,
-          after: correctedCode,
-          reason: 'Align type signature with the assigned value.',
-        },
-      ];
-      explanation = 'Aligning the declared type signature with the assignment prevents compile-time type errors.';
-    }
-  }
-  // 2. Undefined / Null property access (e.g. 2532)
-  else if (codeStr === '2532' || msgLower.includes('undefined') || msgLower.includes('null') || msgLower.includes('cannot read properties')) {
-    errorType = 'TypeError';
-    title = 'Undefined Property Access';
-    summary = `Attempted property access on an object that is or may be undefined (${diagMsg}).`;
-    rootCause = `The target reference has not been verified to exist prior to dereferencing properties. In JavaScript/TypeScript, evaluating property access on null or undefined throws a runtime TypeError.`;
-    whyItHappens = `Runtime engines halt execution when attempting to look up keys on uninitialized or nullish object variables.`;
-
-    if (codeContext.includes('user.name') || relevantLine.includes('user.name')) {
-      originalCode = 'console.log(user.name);';
-      correctedCode = 'console.log(user?.name);';
-      changes = [
-        {
-          line: targetLine,
-          before: 'console.log(user.name);',
-          after: 'console.log(user?.name);',
-          reason: 'Use optional chaining (?.) so evaluating undefined results in undefined rather than a crash.',
-        },
-      ];
-      explanation = 'Using optional chaining (?.) safely evaluates nullish references without throwing an unhandled exception.';
-      confidence = 0.95;
-    } else {
-      originalCode = relevantLine;
-      correctedCode = relevantLine.replace(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)/, '$1?.$2');
-      changes = [
-        {
-          line: targetLine,
-          before: originalCode,
-          after: correctedCode,
-          reason: 'Guard property dereferencing with optional chaining.',
-        },
-      ];
-      explanation = 'Guarding property access avoids runtime null-pointer crashes.';
-    }
-  }
-  // 3. Undeclared Identifier / ReferenceError (e.g. 2304)
-  else if (codeStr === '2304' || msgLower.includes('cannot find name') || errorType === 'ReferenceError' || errorType === 'NameError') {
-    const varMatch =
-      diagMsg.match(/['"]([^'"]+)['"]/) ||
-      diagMsg.match(/^(\w+)\s+is not defined/i) ||
-      (relevantLine ? relevantLine.match(/\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/) : null);
-    const varName = varMatch ? varMatch[1] : 'identifier';
-    errorType = 'ReferenceError';
-    title = `Cannot find name '${varName}'`;
-    summary = `Identifier '${varName}' is referenced before declaration or import.`;
-    rootCause = `The symbol '${varName}' does not exist in the current lexical scope or top-level module imports.`;
-    whyItHappens = `The runtime environment cannot resolve the memory location of an identifier that has not been bound in scope.`;
-
-    originalCode = relevantLine || `console.log(${varName});`;
-    correctedCode = `const ${varName} = "";\n${originalCode}`;
-    changes = [
-      {
-        line: targetLine,
-        before: originalCode,
-        after: correctedCode,
-        reason: `Declare '${varName}' in scope before referencing it.`,
-      },
-    ];
-    explanation = `Declaring the variable in scope creates the required binding and allows the statement to execute safely.`;
-    confidence = 0.9;
-  }
-  // 4. Python / JS IndexError
-  else if (errorType === 'IndexError' || msgLower.includes('index out of range') || (relevantLine.includes('[10]') && relevantLine.includes('numbers'))) {
-    errorType = 'IndexError';
-    title = 'List Index Out of Range';
-    summary = 'Attempted to access an index outside collection boundaries.';
-    rootCause = 'The collection does not contain enough elements to satisfy the requested index. Indices are zero-based and must be strictly less than the length.';
-    whyItHappens = 'Indexing past the end of an array or list attempts to read non-existent memory elements.';
-
-    originalCode = relevantLine || 'print(numbers[10])';
-    if (language === 'python') {
-      correctedCode = `if len(numbers) > 10:\n    print(numbers[10])\nelse:\n    print("Index out of range")`;
-    } else {
-      correctedCode = `if (numbers.length > 10) {\n  console.log(numbers[10]);\n}`;
-    }
-    changes = [
-      {
-        line: targetLine,
-        before: originalCode,
-        after: correctedCode,
-        reason: 'Verify collection length before accessing the index.',
-      },
-    ];
-    explanation = 'Checking collection bounds before indexing prevents runtime IndexErrors.';
-    confidence = 0.9;
-  }
-  // 5. Default generic rule
-  else {
+    rootCause = 'The assigned value does not satisfy its declared type.';
+    explanation = 'Check the intended type and value before changing the annotation or assignment.';
+    status = 'NEEDS_CONTEXT';
+  } else if (codeStr === '2304' || msgLower.includes('cannot find name') || errorType === 'ReferenceError' || errorType === 'NameError') {
+    title = 'Unresolved Identifier';
+    rootCause = 'An identifier cannot be resolved in the supplied scope.';
+    explanation = 'Check the identifier spelling, declaration, and imports. Its intended value cannot be inferred safely.';
+    status = 'NEEDS_CONTEXT';
+  } else if (codeStr === '2532' || msgLower.includes('undefined') || msgLower.includes('null') || msgLower.includes('cannot read properties')) {
+    title = 'Possibly Missing Value';
+    rootCause = 'A property access may depend on a null or undefined value.';
+    explanation = 'Confirm which value may be missing and whether the program should skip, default, or reject that case.';
+    status = 'NEEDS_CONTEXT';
+  } else if (errorType === 'IndexError' || msgLower.includes('index out of range')) {
+    title = 'Index Out of Range';
+    rootCause = 'The requested position is outside the collection bounds.';
+    explanation = 'Check the collection and index against the intended behavior. No replacement index or value is assumed.';
+    status = 'NEEDS_CONTEXT';
+  } else {
     originalCode = relevantLine;
     correctedCode = relevantLine;
-    explanation = `Inspect line ${targetLine} and align the statements with language syntax.`;
+    explanation = 'Inspect the referenced diagnostic and surrounding declarations.';
   }
 
   const analysis = {
