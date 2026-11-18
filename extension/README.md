@@ -45,7 +45,7 @@ Configure these in VS Code Settings (`Cmd+,` / `Ctrl+,` search for `Bugify`):
 
 ## Test Fixtures
 
-The extension includes a dedicated test workspace located in `test-fixtures/`:
+The extension includes a dedicated test workspace located in `../fixtures/test-fixtures/`:
 
 1. **`js-undefined.js`**:
    - `const user = undefined; console.log(user.name);`
@@ -95,7 +95,7 @@ npm test
 ### Launching in VS Code
 1. Open the project in VS Code.
 2. Select **Run Bugify Extension (with test-fixtures)** in Run & Debug and press `F5`.
-3. A new Extension Development Host window will open with `test-fixtures/` loaded.
+3. A new Extension Development Host window will open with `../fixtures/test-fixtures/` loaded.
 
 On macOS, `npm run host` launches VS Code with the fixtures; `npm run host:antigravity` launches Antigravity. Neither command builds source files.
 

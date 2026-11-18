@@ -261,10 +261,10 @@ describe('Local Diagnostic Explanations (Instant Offline Display)', () => {
       endColumn: 11,
     };
 
-    const res = buildLocalAnalysis(diagnostic, 'extension/test-fixtures/ts-mismatch.ts');
+    const res = buildLocalAnalysis(diagnostic, '../fixtures/test-fixtures/ts-mismatch.ts');
 
     assert.strictEqual(res.errorType, 'TypeScript Error');
-    assert.strictEqual(res.location.file, 'extension/test-fixtures/ts-mismatch.ts');
+    assert.strictEqual(res.location.file, '../fixtures/test-fixtures/ts-mismatch.ts');
     assert.strictEqual(res.location.line, 3);
     assert.strictEqual(res.summary, "Type 'string' is not assignable to type 'number'.");
     assert.ok(res.explanation.includes('string value was assigned to a variable that was declared as a number'));
@@ -285,7 +285,7 @@ describe('Local Diagnostic Explanations (Instant Offline Display)', () => {
       endColumn: 22,
     };
 
-    const res = buildLocalAnalysis(diagnostic, 'extension/test-fixtures/js-undefined.js');
+    const res = buildLocalAnalysis(diagnostic, '../fixtures/test-fixtures/js-undefined.js');
 
     assert.strictEqual(res.errorType, 'TypeError');
     assert.ok(res.suggestion.includes('optional chaining'));
@@ -303,7 +303,7 @@ describe('Local Diagnostic Explanations (Instant Offline Display)', () => {
       endColumn: 21,
     };
 
-    const res = buildLocalAnalysis(diagnostic, 'extension/test-fixtures/js-reference.js');
+    const res = buildLocalAnalysis(diagnostic, '../fixtures/test-fixtures/js-reference.js');
 
     assert.strictEqual(res.errorType, 'ReferenceError');
     assert.strictEqual(res.status, 'needs_context');
@@ -801,7 +801,7 @@ describe('Workspace Issue Normalization & Deduplication', () => {
 describe('Project Capability Detection', () => {
   test('discovers tsconfig in test-workspace', async () => {
     const path = require('path');
-    const wsRoot = path.resolve(__dirname, '../test-workspace');
+    const wsRoot = path.resolve(__dirname, '../../fixtures/test-workspace');
     const caps = await detectProjectCapabilities(wsRoot);
 
     assert.strictEqual(caps.hasTypeScript, true);
@@ -811,7 +811,7 @@ describe('Project Capability Detection', () => {
 
   test('discovers tsconfig in test-fixtures', async () => {
     const path = require('path');
-    const fixturesRoot = path.resolve(__dirname, '../test-fixtures');
+    const fixturesRoot = path.resolve(__dirname, '../../fixtures/test-fixtures');
     const caps = await detectProjectCapabilities(fixturesRoot);
 
     assert.strictEqual(caps.hasTypeScript, true);

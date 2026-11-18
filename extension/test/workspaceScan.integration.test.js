@@ -8,7 +8,7 @@ const { normalizeAndDeduplicateIssues } = require('../src/scanner/normalizer');
 
 describe('Integration Test: Closed-File Workspace Scan (test-workspace)', () => {
   test('discovers errors in hidden-error.ts and another-error.ts while clean.ts has no errors', async () => {
-    const wsRoot = path.resolve(__dirname, '../test-workspace');
+    const wsRoot = path.resolve(__dirname, '../../fixtures/test-workspace');
     const caps = await detectProjectCapabilities(wsRoot);
 
     assert.strictEqual(caps.hasTypeScript, true, 'Must detect TypeScript project');
@@ -52,7 +52,7 @@ describe('Integration Test: Closed-File Workspace Scan (test-workspace)', () => 
 
 describe('Integration Test: Closed-File Workspace Scan (test-fixtures)', () => {
   test('discovers ts-mismatch.ts and js-reference.js in test-fixtures', async () => {
-    const fixturesRoot = path.resolve(__dirname, '../test-fixtures');
+    const fixturesRoot = path.resolve(__dirname, '../../fixtures/test-fixtures');
     const caps = await detectProjectCapabilities(fixturesRoot);
 
     assert.strictEqual(caps.hasTypeScript, true);

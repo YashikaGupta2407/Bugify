@@ -9,7 +9,7 @@ const { normalizeAndDeduplicateIssues } = require('../src/scanner/normalizer');
 const { parseTscOutput } = require('../src/scanner/parsers/tscParser');
 
 describe('Acceptance Test: Closed-File Discovery (Sections 4 & 20)', () => {
-  const testWorkspaceRoot = path.resolve(__dirname, '../test-workspace');
+  const testWorkspaceRoot = path.resolve(__dirname, '../../fixtures/test-workspace');
 
   test('Step 1-3: Project has tsconfig.json, clean open.ts/app.ts, and closed error files', () => {
     assert.ok(fs.existsSync(path.join(testWorkspaceRoot, 'tsconfig.json')), 'tsconfig.json must exist');

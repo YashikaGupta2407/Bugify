@@ -113,8 +113,8 @@
   "scripts": {
     "test": "node --test test/pure.test.js test/workspaceScan.integration.test.js test/closedFileScan.acceptance.test.js test/realWorldDebugging.acceptance.test.js",
     "package": "npx @vscode/vsce package --no-dependencies --allow-missing-repository",
-    "host": "\"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/test-fixtures\"",
-    "host:antigravity": "\"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/test-fixtures\""
+    "host": "\"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/../fixtures/test-fixtures\"",
+    "host:antigravity": "\"/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide\" --extensionDevelopmentPath=\"$PWD\" \"$PWD/../fixtures/test-fixtures\""
   },
   "dependencies": {
     "typescript": "^5.3.3"
