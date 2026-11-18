@@ -85,7 +85,7 @@ if [[ $RG_OK -eq 1 && $FD_OK -eq 1 ]]; then
     echo " ✅ All search tools are ready!"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    echo "You can use ./scripts/search_repo.sh for optimized searching."
+    echo "You can use ./archive/scaffolding/scripts/search_repo.sh for optimized searching."
     exit 0
 else
     echo "⚠️  Some tools are missing (optional)"

@@ -231,7 +231,7 @@ GSD-STYLE.md              # Style and conventions
 
 adapters/                 # Optional model-specific enhancements
 docs/                     # Operational documentation
-scripts/                  # Utility scripts
+archive/scaffolding/scripts/ # Utility scripts
 ```
 
 ---

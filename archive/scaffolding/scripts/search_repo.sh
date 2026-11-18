@@ -1,12 +1,12 @@
 #!/bin/bash
 # search_repo.sh - Search codebase with best available tool
 #
-# Usage: ./scripts/search_repo.sh <pattern> [path] [options]
+# Usage: ./archive/scaffolding/scripts/search_repo.sh <pattern> [path] [options]
 #
 # Examples:
-#   ./scripts/search_repo.sh "TODO"
-#   ./scripts/search_repo.sh "function.*login" src/
-#   ./scripts/search_repo.sh "error" --type ts
+#   ./archive/scaffolding/scripts/search_repo.sh "TODO"
+#   ./archive/scaffolding/scripts/search_repo.sh "function.*login" src/
+#   ./archive/scaffolding/scripts/search_repo.sh "error" --type ts
 
 set -e
 
@@ -19,9 +19,9 @@ if [[ -z "$PATTERN" ]]; then
     echo "Usage: search_repo.sh <pattern> [path] [options]"
     echo ""
     echo "Examples:"
-    echo "  ./scripts/search_repo.sh 'TODO'"
-    echo "  ./scripts/search_repo.sh 'login' src/"
-    echo "  ./scripts/search_repo.sh 'error' . --type ts"
+    echo "  ./archive/scaffolding/scripts/search_repo.sh 'TODO'"
+    echo "  ./archive/scaffolding/scripts/search_repo.sh 'login' src/"
+    echo "  ./archive/scaffolding/scripts/search_repo.sh 'error' . --type ts"
     exit 1
 fi
 
