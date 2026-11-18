@@ -278,13 +278,16 @@ Explain why this error occurred and how to fix it according to the requested JSO
 
       // Validate required fields
       if (aiResult && aiResult.summary && aiResult.cause && aiResult.explanation) {
+        const correctedCode = aiResult.correctedCode ? String(aiResult.correctedCode) : null;
+        const hasChange = correctedCode !== null && correctedCode !== code;
         return {
           summary: String(aiResult.summary),
           cause: String(aiResult.cause),
           location: aiResult.location ? String(aiResult.location) : 'Could not be determined precisely',
           explanation: String(aiResult.explanation),
           suggestion: String(aiResult.suggestion || ''),
-          correctedCode: aiResult.correctedCode ? String(aiResult.correctedCode) : null,
+          status: hasChange ? 'suggested' : 'NEEDS_CONTEXT',
+          correctedCode: hasChange ? correctedCode : null,
         };
       }
     } catch (llmError) {
@@ -432,7 +435,8 @@ function buildRuleBasedAnalysis({
     status = 'NEEDS_CONTEXT';
   } else {
     originalCode = relevantLine;
-    correctedCode = relevantLine;
+    status = 'NEEDS_CONTEXT';
+    correctedCode = null;
     explanation = 'Inspect the referenced diagnostic and surrounding declarations.';
   }
 
@@ -483,6 +487,12 @@ function buildRuleBasedAnalysis({
   });
 
   analysis.validation = validation;
+  analysis.verificationStatus = validation.verificationStatus;
+  if (validation.status === 'needs_context' || validation.status === 'validation_failed') {
+    analysis.status = 'NEEDS_CONTEXT';
+    analysis.correctedCode = null;
+    analysis.changes = [];
+  }
   return analysis;
 }
 /**
@@ -665,7 +675,9 @@ Return ONLY valid JSON matching this schema:
         const correctedCode = rawResult.correctedCode
           ? indentation + String(rawResult.correctedCode).trimStart()
           : null;
-        const status = rawResult.status || (correctedCode ? 'fixed' : 'needs_context');
+        const status = correctedCode === originalCode || !correctedCode
+          ? 'NEEDS_CONTEXT'
+          : rawResult.status || 'fixed';
 
         // Run validation pipeline on generated fix
         const validation = validateFix({
@@ -678,10 +690,12 @@ Return ONLY valid JSON matching this schema:
           status,
           diagnostic: primaryDiag,
         });
+        const withhold = String(status).toLowerCase() === 'needs_context' ||
+          status === 'cannot_fix' || validation.status === 'needs_context' || validation.status === 'validation_failed';
 
         return {
           analysisSource: 'ai',
-          status,
+          status: withhold ? 'NEEDS_CONTEXT' : status,
           errorType: rawResult.errorType || errorType || 'DiagnosticError',
           title: rawResult.title || `${errorType || 'Error'} at line ${targetLine}`,
           location: {
@@ -696,12 +710,13 @@ Return ONLY valid JSON matching this schema:
           rootCause: String(rawResult.rootCause || rawResult.cause || ''),
           whyItHappens: String(rawResult.whyItHappens || rawResult.explanation || ''),
           originalCode,
-          correctedCode,
-          changes: Array.isArray(rawResult.changes) ? rawResult.changes : [],
+          correctedCode: withhold ? null : correctedCode,
+          changes: withhold ? [] : Array.isArray(rawResult.changes) ? rawResult.changes : [],
           explanation: String(rawResult.explanation || ''),
           confidence: typeof rawResult.confidence === 'number' ? rawResult.confidence : 0.9,
           severity,
           validation,
+          verificationStatus: validation.verificationStatus,
           // Backward compatibility
           cause: String(rawResult.rootCause || rawResult.cause || ''),
           suggestion: String(rawResult.explanation || rawResult.whyItHappens || ''),

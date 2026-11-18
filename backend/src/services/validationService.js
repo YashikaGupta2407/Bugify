@@ -110,6 +110,7 @@ function validateFix({ language = 'plaintext', originalCode, correctedCode, stat
     verificationStatus: checkStatus === 'UNVERIFIED' ? 'NOT_VERIFIED' : checkStatus,
   });
   if (String(status).toLowerCase() === 'needs_context') return report('needs_context', 'UNVERIFIED', 'More context is required to propose a repair.');
+  if (typeof correctedCode === 'string' && correctedCode === originalCode) return report('needs_context', 'UNVERIFIED', 'Proposed change is identical to original code.');
   if (status === 'cannot_fix' || !correctedCode || !correctedCode.trim()) return report('cannot_fix', 'UNVERIFIED', 'No replacement code is available.');
   if (/\/\/\s*@ts-(ignore|nocheck)|\bas\s+any\b|\/\*\s*eslint-disable/.test(correctedCode)) {
     return report('validation_failed', 'UNVERIFIED', 'Replacement uses type suppression instead of fixing the root cause.', 'quality-linter');

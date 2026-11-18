@@ -165,7 +165,7 @@ function validateProposedFix(params) {
         verificationStatus: checkStatus === 'UNVERIFIED' ? 'NOT_VERIFIED' : checkStatus,
     });
     if (!correctedCode || !correctedCode.trim()) return report('needs_context', 'UNVERIFIED', 'No replacement code is available.');
-    if (originalCode && correctedCode.trim() === originalCode.trim()) return report('validation_failed', 'UNVERIFIED', 'Proposed change is identical to original code.');
+    if (correctedCode === originalCode) return report('needs_context', 'UNVERIFIED', 'Proposed change is identical to original code.');
     if (correctedCode.includes('console?.') && !originalCode?.includes('console?.')) {
         return report('validation_failed', 'UNVERIFIED', 'Fix guarded console rather than the problematic property dereference.');
     }

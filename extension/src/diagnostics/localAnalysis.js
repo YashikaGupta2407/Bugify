@@ -171,6 +171,10 @@ function buildLocalAnalysis(diagnostic, filePath, providedLineText, providedFull
             correctedCode,
             diagnostic,
         });
+        if (correctedCode !== null && correctedCode === originalCode) {
+            correctedCode = null;
+            changes = [];
+        }
         const isInfo = normSeverity === 'information' || normSeverity === 'hint';
         return {
             analysisSource: 'rules',
@@ -249,6 +253,10 @@ function buildLocalAnalysis(diagnostic, filePath, providedLineText, providedFull
             correctedCode,
             diagnostic,
         });
+        if (correctedCode !== null && correctedCode === originalCode) {
+            correctedCode = null;
+            changes = [];
+        }
         const rootCause = `A value of type '${assignedType}' was assigned to '${varName}', which is typed as '${expectedType}'. ${varName} expects a ${expectedType} but ${assignedVal} is a ${assignedType}.`;
         const cause = `${varName} expects a ${expectedType} but ${assignedVal} is a ${assignedType}. In TypeScript, statically typed variables cannot be assigned values of incompatible types.`;
         const whyItHappens = 'TypeScript enforces compile-time type safety. When a variable declared as one type receives a value of another type, compilation halts.';
@@ -374,6 +382,10 @@ function buildLocalAnalysis(diagnostic, filePath, providedLineText, providedFull
             correctedCode,
             diagnostic,
         });
+        if (correctedCode !== null && correctedCode === originalCode) {
+            correctedCode = null;
+            changes = [];
+        }
         return {
             analysisSource: 'rules',
             status: correctedCode ? 'fixed' : 'needs_context',
