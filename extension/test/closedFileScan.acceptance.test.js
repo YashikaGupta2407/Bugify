@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');
 
-const { runTscAnalyzer } = require('../out/scanner/analyzers/tscAnalyzer');
-const { detectProjectCapabilities } = require('../out/scanner/projectDetector');
-const { normalizeAndDeduplicateIssues } = require('../out/scanner/normalizer');
-const { parseTscOutput } = require('../out/scanner/parsers/tscParser');
+const { runTscAnalyzer } = require('../src/scanner/analyzers/tscAnalyzer');
+const { detectProjectCapabilities } = require('../src/scanner/projectDetector');
+const { normalizeAndDeduplicateIssues } = require('../src/scanner/normalizer');
+const { parseTscOutput } = require('../src/scanner/parsers/tscParser');
 
 describe('Acceptance Test: Closed-File Discovery (Sections 4 & 20)', () => {
   const testWorkspaceRoot = path.resolve(__dirname, '../test-workspace');

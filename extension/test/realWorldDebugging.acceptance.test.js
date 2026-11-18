@@ -3,13 +3,13 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');
 
-const { detectProjectCapabilities, findSourceFiles } = require('../out/scanner/projectDetector');
-const { runTscAnalyzer } = require('../out/scanner/analyzers/tscAnalyzer');
-const { runPythonAnalyzer } = require('../out/scanner/analyzers/pythonAnalyzer');
-const { normalizeAndDeduplicateIssues, buildStateMessage } = require('../out/scanner/normalizer');
-const { buildLocalAnalysis } = require('../out/diagnostics/localAnalysis');
-const { classifyErrorCategory, isActionableSeverity, mapDiagnosticSeverity } = require('../out/diagnostics/diagnosticUtils');
-const { validateProposedFix } = require('../out/diagnostics/fixValidator');
+const { detectProjectCapabilities, findSourceFiles } = require('../src/scanner/projectDetector');
+const { runTscAnalyzer } = require('../src/scanner/analyzers/tscAnalyzer');
+const { runPythonAnalyzer } = require('../src/scanner/analyzers/pythonAnalyzer');
+const { normalizeAndDeduplicateIssues, buildStateMessage } = require('../src/scanner/normalizer');
+const { buildLocalAnalysis } = require('../src/diagnostics/localAnalysis');
+const { classifyErrorCategory, isActionableSeverity, mapDiagnosticSeverity } = require('../src/diagnostics/diagnosticUtils');
+const { validateProposedFix } = require('../src/diagnostics/fixValidator');
 
 describe('Phase 14 Mandatory Acceptance Test: Plain JS Workspace with Closed Error File', () => {
   const phase14Dir = path.resolve(__dirname, '../test-realworld-phase14');

@@ -2,9 +2,9 @@ const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const { runTscAnalyzer } = require('../out/scanner/analyzers/tscAnalyzer');
-const { detectProjectCapabilities } = require('../out/scanner/projectDetector');
-const { normalizeAndDeduplicateIssues } = require('../out/scanner/normalizer');
+const { runTscAnalyzer } = require('../src/scanner/analyzers/tscAnalyzer');
+const { detectProjectCapabilities } = require('../src/scanner/projectDetector');
+const { normalizeAndDeduplicateIssues } = require('../src/scanner/normalizer');
 
 describe('Integration Test: Closed-File Workspace Scan (test-workspace)', () => {
   test('discovers errors in hidden-error.ts and another-error.ts while clean.ts has no errors', async () => {

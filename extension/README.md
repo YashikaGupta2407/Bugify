@@ -79,12 +79,13 @@ The extension includes a dedicated test workspace located in `test-fixtures/`:
 
 ## Development & Testing
 
-### Building the Extension
+### Installing Development Dependencies
 ```bash
 cd extension
 npm install
-npm run compile
 ```
+
+The extension runs CommonJS JavaScript directly from `src/extension.js`. There is no compile or watch step. TypeScript remains a runtime dependency, and the vendored compiler is retained for analyzing users' JavaScript and TypeScript projects.
 
 ### Running Automated Tests
 ```bash
@@ -93,6 +94,15 @@ npm test
 
 ### Launching in VS Code
 1. Open the project in VS Code.
-2. Press `F5` (or go to Run & Debug -> **Run Bugify Extension**).
+2. Select **Run Bugify Extension (with test-fixtures)** in Run & Debug and press `F5`.
 3. A new Extension Development Host window will open with `test-fixtures/` loaded.
+
+On macOS, `npm run host` launches VS Code with the fixtures; `npm run host:antigravity` launches Antigravity. Neither command builds source files.
+
+### Packaging
+```bash
+npm run package
+```
+
+The existing `--no-dependencies` option excludes `node_modules`, including the installed TypeScript dependency. The package includes `src/`, `media/`, and `vendor/typescript/`. Compiler-resolution behavior is unchanged: the fix validator tries `require('typescript')` first, then its existing vendor fallbacks if that require fails.
 

@@ -1,9 +1,9 @@
 const { test, describe } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Import compiled pure modules
-const { isSensitiveFile, redactSecrets } = require('../out/context/redact');
-const { extractCodeWindow, capSelection } = require('../out/context/windowing');
+// Import JavaScript source modules
+const { isSensitiveFile, redactSecrets } = require('../src/context/redact');
+const { extractCodeWindow, capSelection } = require('../src/context/windowing');
 const {
   normalizeDiagnosticCode,
   mapDiagnosticSeverity,
@@ -12,7 +12,7 @@ const {
   convertTo1Based,
   findDiagnosticAtCursor,
   findNearestDiagnostic,
-} = require('../out/diagnostics/diagnosticUtils');
+} = require('../src/diagnostics/diagnosticUtils');
 
 describe('Client-side Privacy & File-skip Rules', () => {
   test('correctly flags sensitive filenames', () => {
@@ -247,7 +247,7 @@ describe('Diagnostic Normalization & Coordinate Conversion', () => {
 });
 
 describe('Local Diagnostic Explanations (Instant Offline Display)', () => {
-  const { buildLocalAnalysis } = require('../out/diagnostics/localAnalysis');
+  const { buildLocalAnalysis } = require('../src/diagnostics/localAnalysis');
 
   test('builds instant local analysis for TypeScript type mismatch (code 2322)', () => {
     const diagnostic = {
@@ -495,7 +495,7 @@ describe('Diagnostic Severity Classification & Filtering Pipeline', () => {
 });
 
 describe('Workspace-wide Diagnostics & File Grouping', () => {
-  const { isWorkspaceRelevantPath, groupDiagnosticsByFile } = require('../out/diagnostics/diagnosticUtils');
+  const { isWorkspaceRelevantPath, groupDiagnosticsByFile } = require('../src/diagnostics/diagnosticUtils');
 
   test('correctly identifies workspace-relevant paths and filters node_modules/build', () => {
     const roots = ['/Users/dev/project'];
@@ -582,15 +582,15 @@ describe('Workspace-wide Diagnostics & File Grouping', () => {
 // ---------------------------------------------------------------------------
 // Workspace Scan Engine Tests
 // ---------------------------------------------------------------------------
-const { parseTscOutput } = require('../out/scanner/parsers/tscParser');
-const { parseEslintOutput } = require('../out/scanner/parsers/eslintParser');
-const { parsePythonOutput } = require('../out/scanner/parsers/pythonParser');
+const { parseTscOutput } = require('../src/scanner/parsers/tscParser');
+const { parseEslintOutput } = require('../src/scanner/parsers/eslintParser');
+const { parsePythonOutput } = require('../src/scanner/parsers/pythonParser');
 const {
   isWorkspaceRelevantPath: isScannerRelevantPath,
   normalizeAndDeduplicateIssues,
   buildStateMessage,
-} = require('../out/scanner/normalizer');
-const { detectProjectCapabilities } = require('../out/scanner/projectDetector');
+} = require('../src/scanner/normalizer');
+const { detectProjectCapabilities } = require('../src/scanner/projectDetector');
 
 describe('TypeScript Compiler (tsc) Output Parser', () => {
   test('parses standard colon-formatted tsc error', () => {
@@ -820,11 +820,11 @@ describe('Project Capability Detection', () => {
 });
 
 describe('Regression Tests: JavaScript Scanner & Fix Targeting Accuracy', () => {
-  const { buildLocalAnalysis } = require('../out/diagnostics/localAnalysis');
-  const { validateProposedFix } = require('../out/diagnostics/fixValidator');
-  const { normalizeAndDeduplicateIssues } = require('../out/scanner/normalizer');
-  const { parseTscOutput } = require('../out/scanner/parsers/tscParser');
-  const { filterPlainJsFalsePositives } = require('../out/scanner/analyzers/tscAnalyzer');
+  const { buildLocalAnalysis } = require('../src/diagnostics/localAnalysis');
+  const { validateProposedFix } = require('../src/diagnostics/fixValidator');
+  const { normalizeAndDeduplicateIssues } = require('../src/scanner/normalizer');
+  const { parseTscOutput } = require('../src/scanner/parsers/tscParser');
+  const { filterPlainJsFalsePositives } = require('../src/scanner/analyzers/tscAnalyzer');
 
   test('Regression 1: Undefined property access guards target variable, not logger console.log', () => {
     const diag = {
@@ -996,7 +996,7 @@ describe('UI Placement & Activity Bar View Registration Verification', () => {
     };
   }
 
-  const { BugifySidebarViewProvider } = require('../out/ui/sidebarProvider');
+  const { BugifySidebarViewProvider } = require('../src/ui/sidebarProvider');
 
   const pkgJsonPath = path.join(__dirname, '..', 'package.json');
   const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
