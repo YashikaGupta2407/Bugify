@@ -27,6 +27,8 @@ exports.capSelection = capSelection;
  * Extracts a bounded window of code lines around a target line or selection.
  */
 function extractCodeWindow(options) {
+    // targetLine/startLine/endLine are 1-based absolute file lines;
+    // startLine and endLine bound the window inclusively.
     const { content = '', targetLine = 1, contextLines = 20, selectionText = '', maxChars = 64000, } = options;
     if (!content) {
         return {

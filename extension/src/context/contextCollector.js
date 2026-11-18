@@ -154,6 +154,10 @@ async function collectDocumentContext(document, options) {
         },
         selection: redactedSelection,
         codeContext: redactedCodeContext,
+        // Inclusive, 1-based absolute file lines. Diagnostic/cursor positions
+        // are also 1-based; their end position is exclusive.
+        codeContextStartLine: windowResult.startLine,
+        codeContextEndLine: windowResult.endLine,
         functionContext: redactedFunctionContext,
         imports: redactedImports,
         dependencies,

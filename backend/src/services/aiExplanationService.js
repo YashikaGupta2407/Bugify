@@ -354,6 +354,17 @@ CRITICAL RULES:
  * Builds a deterministic rule-based analysis when AI is unconfigured or unavailable.
  * Strictly labelled as analysisSource: "rules".
  */
+// Wire lines and columns are 1-based absolute file positions; window endpoints
+// are inclusive. Only the array offset below is 0-based.
+function getContextLine(codeContext, codeContextStartLine, codeContextEndLine, targetLine) {
+  if (typeof codeContext !== 'string' || !Number.isInteger(codeContextStartLine) || codeContextStartLine < 1 ||
+      !Number.isInteger(codeContextEndLine) || codeContextEndLine < codeContextStartLine ||
+      !Number.isInteger(targetLine) || targetLine < codeContextStartLine || targetLine > codeContextEndLine) return null;
+  const lines = codeContext.split(/\r?\n/);
+  if (lines.length !== codeContextEndLine - codeContextStartLine + 1) return null;
+  return { text: lines[targetLine - codeContextStartLine] };
+}
+
 function buildRuleBasedAnalysis({
   mode,
   detail,
@@ -362,6 +373,10 @@ function buildRuleBasedAnalysis({
   diagnostics = [],
   errorType,
   codeContext = '',
+  codeContextStartLine,
+  codeContextEndLine,
+  fullFileContent,
+  cursor,
   functionContext,
   imports,
   dependencies,
@@ -369,27 +384,22 @@ function buildRuleBasedAnalysis({
   language = 'plaintext',
 }) {
   const primaryDiag = diagnostic || (diagnostics && diagnostics.length > 0 ? diagnostics[0] : null);
-  const targetLine = primaryDiag?.startLine || 1;
+  const targetLine = primaryDiag?.startLine ?? cursor?.line;
   const startCol = primaryDiag?.startColumn || 1;
   const endLine = primaryDiag?.endLine || targetLine;
   const endCol = primaryDiag?.endColumn || 20;
   const diagMsg = primaryDiag?.message || 'Code inspection requested';
   const filePath = file?.path || 'unknown';
 
-  // Extract relevant original code line from codeContext if available
-  const contextLines = (codeContext || '').split(/\r?\n/);
-  let relevantLine = '';
-  if (contextLines.length > 0) {
-    const errorLineIdx = targetLine > 0 && targetLine <= contextLines.length ? targetLine - 1 : 0;
-    relevantLine = contextLines[errorLineIdx]?.trim() || contextLines[0]?.trim() || '';
-  }
+  const contextLine = getContextLine(codeContext, codeContextStartLine, codeContextEndLine, targetLine);
+  const relevantLine = contextLine?.text ?? '';
 
   let status = 'fixed';
   let title = `Issue at line ${targetLine}`;
   let summary = diagMsg;
   let rootCause = 'The language server detected code that does not satisfy language constraints.';
   let whyItHappens = 'Code statements must comply with syntax, scope, and type checking rules.';
-  let originalCode = relevantLine || diagMsg;
+  let originalCode = relevantLine;
   let correctedCode = null;
   let changes = [];
   let explanation = 'Review the highlighted statements and adjust types or values accordingly.';
@@ -426,6 +436,13 @@ function buildRuleBasedAnalysis({
     explanation = 'Inspect the referenced diagnostic and surrounding declarations.';
   }
 
+  if (!contextLine) {
+    status = 'NEEDS_CONTEXT';
+    correctedCode = null;
+    changes = [];
+    explanation = 'The diagnostic is outside the supplied window or its 1-based window coordinates are missing or inconsistent.';
+  }
+
   const analysis = {
     analysisSource: 'rules',
     status,
@@ -457,6 +474,8 @@ function buildRuleBasedAnalysis({
   const validation = validateFix({
     language,
     codeContext,
+    fullFileContent,
+    filePath,
     originalCode,
     correctedCode,
     status,
@@ -490,6 +509,9 @@ async function explainExtensionDiagnostic({
   cursor,
   selection,
   codeContext,
+  codeContextStartLine,
+  codeContextEndLine,
+  fullFileContent,
   functionContext,
   imports,
   dependencies,
@@ -507,7 +529,7 @@ async function explainExtensionDiagnostic({
   const safeFunctionContext = redactSecrets(functionContext || '');
   const safeImports = redactSecrets(imports || '');
   const primaryDiag = diagnostic || (diagnostics && diagnostics.length > 0 ? diagnostics[0] : null);
-  const targetLine = primaryDiag?.startLine || cursor?.line || 1;
+  const targetLine = primaryDiag?.startLine ?? cursor?.line;
   const startCol = primaryDiag?.startColumn || 1;
   const endLine = primaryDiag?.endLine || targetLine;
   const endCol = primaryDiag?.endColumn || 20;
@@ -518,7 +540,7 @@ async function explainExtensionDiagnostic({
   const model = process.env.AI_MODEL || (provider === 'openai' ? 'gpt-4o-mini' : 'gemini-1.5-flash');
 
   // If no AI key configured, use deterministic rule-based analysis directly
-  if (!apiKey) {
+  if (!apiKey || !getContextLine(safeCodeContext, codeContextStartLine, codeContextEndLine, targetLine)) {
     return buildRuleBasedAnalysis({
       mode,
       detail,
@@ -527,6 +549,10 @@ async function explainExtensionDiagnostic({
       diagnostics,
       errorType,
       codeContext: safeCodeContext,
+      codeContextStartLine,
+      codeContextEndLine,
+      fullFileContent,
+      cursor,
       functionContext: safeFunctionContext,
       imports: safeImports,
       dependencies,
@@ -629,14 +655,24 @@ Return ONLY valid JSON matching this schema:
       }
 
       if (rawResult && rawResult.summary && (rawResult.rootCause || rawResult.cause)) {
-        const correctedCode = rawResult.correctedCode ? String(rawResult.correctedCode) : null;
-        const originalCode = rawResult.originalCode ? String(rawResult.originalCode) : '';
+        const contextLine = getContextLine(safeCodeContext, codeContextStartLine, codeContextEndLine, targetLine);
+        const originalCode = contextLine.text;
+        if (rawResult.originalCode && String(rawResult.originalCode).trim() !== originalCode.trim()) {
+          throw new Error('Model replacement does not target the diagnostic line in the supplied window');
+        }
+        // Keep the real line's indentation when a provider returns an unindented line.
+        const indentation = originalCode.match(/^\s*/)[0];
+        const correctedCode = rawResult.correctedCode
+          ? indentation + String(rawResult.correctedCode).trimStart()
+          : null;
         const status = rawResult.status || (correctedCode ? 'fixed' : 'needs_context');
 
         // Run validation pipeline on generated fix
         const validation = validateFix({
           language: lang,
+          filePath: file?.path,
           codeContext: safeCodeContext,
+          fullFileContent,
           originalCode,
           correctedCode,
           status,
@@ -650,11 +686,11 @@ Return ONLY valid JSON matching this schema:
           title: rawResult.title || `${errorType || 'Error'} at line ${targetLine}`,
           location: {
             file: file?.path || 'unknown',
-            startLine: rawResult.location?.startLine || targetLine,
-            startColumn: rawResult.location?.startColumn || startCol,
-            endLine: rawResult.location?.endLine || endLine,
-            endColumn: rawResult.location?.endColumn || endCol,
-            line: rawResult.location?.startLine || targetLine,
+            startLine: targetLine,
+            startColumn: startCol,
+            endLine,
+            endColumn: endCol,
+            line: targetLine,
           },
           summary: String(rawResult.summary),
           rootCause: String(rawResult.rootCause || rawResult.cause || ''),
@@ -685,6 +721,10 @@ Return ONLY valid JSON matching this schema:
     diagnostics,
     errorType,
     codeContext: safeCodeContext,
+    codeContextStartLine,
+    codeContextEndLine,
+    fullFileContent,
+    cursor,
     functionContext: safeFunctionContext,
     imports: safeImports,
     dependencies,

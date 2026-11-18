@@ -43,6 +43,9 @@
  * @property {{ line: number; column: number; }} [cursor]
  * @property {string} [selection]
  * @property {string} codeContext
+ * @property {number} codeContextStartLine Inclusive 1-based absolute file line.
+ * @property {number} codeContextEndLine Inclusive 1-based absolute file line.
+ * @property {string} [fullFileContent] Optional explicit full-file validation input; not sent by default.
  * @property {string} [functionContext]
  * @property {string} [imports]
  * @property {Record<string, string>} [dependencies]
