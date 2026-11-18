@@ -1,6 +1,6 @@
 // backend/src/controllers/extensionController.js
 // Handles VS Code extension requests: validation, error classification, AI/rules analysis, and session persistence.
-const prisma = require('../prisma');
+const prisma = require('../config/prisma');
 const { classifyDiagnostic } = require('../services/errorClassifier');
 const { explainExtensionDiagnostic } = require('../services/aiExplanationService');
 

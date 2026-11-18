@@ -287,7 +287,7 @@ for (const status of ['PROVIDER_ERROR', 'PENDING', 'TIMEOUT']) {
       $transaction: async callback => callback(tx),
     };
     const controller = load('../src/controllers/submissionController.js', { mocks: {
-      '../prisma': prisma,
+      '../config/prisma': prisma,
       '../services/codeExecutionService': { executeCode: async () => ({ status }) },
       '../services/errorClassifier': { classifyResult: () => ({ status, isInfrastructureFailure: true, errorType: status, errorMessage: 'Execution provider unavailable', executionTime: 0 }) },
       '../services/aiExplanationService': { generateExplanation: async () => { explanations++; return null; } },
@@ -306,7 +306,7 @@ for (const status of ['PROVIDER_ERROR', 'PENDING', 'TIMEOUT']) {
 test('D3 controller: forwards 1-based window endpoints and optional full file content', async () => {
   let received;
   const controller = load('../src/controllers/extensionController.js', { mocks: {
-    '../prisma': { user: { findUnique: async () => ({ id: 1 }) }, extensionDebugSession: { create: async () => ({ id: 9 }) } },
+    '../config/prisma': { user: { findUnique: async () => ({ id: 1 }) }, extensionDebugSession: { create: async () => ({ id: 9 }) } },
     '../services/aiExplanationService': { explainExtensionDiagnostic: async args => { received = args; return { status: 'NEEDS_CONTEXT', summary: 'More context needed', analysisSource: 'rules' }; } },
   } });
   const res = response(); let caught;

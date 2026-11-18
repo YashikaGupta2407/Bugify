@@ -154,7 +154,7 @@ The extension will provide relevant debugging information without requiring user
 ```text
 bugify/
 │
-├── frontend/
+├── website/
 │   ├── src/
 │   ├── public/
 │   └── package.json
@@ -281,7 +281,7 @@ npm install
 ### Frontend
 
 ```bash
-cd frontend
+cd website
 npm install
 ```
 
@@ -347,7 +347,7 @@ GET http://localhost:5000/api/health
 Open another terminal:
 
 ```bash
-cd frontend
+cd website
 npm run dev
 ```
 

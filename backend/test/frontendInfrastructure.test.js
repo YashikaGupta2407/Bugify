@@ -9,7 +9,7 @@ const ts = require('typescript');
 
 // Execute the actual App.jsx handlers and render branches using a minimal hook
 // harness. All fetches/timers are local stubs. No app changes or live server.
-const filename = path.resolve(__dirname, '../../frontend/src/App.jsx');
+const filename = path.resolve(__dirname, '../../website/src/App.jsx');
 const javascript = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
   fileName: 'App.jsx', compilerOptions: {
     allowJs: true, jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS,
@@ -52,7 +52,7 @@ function harness(status) {
     } }),
   };
   vm.runInNewContext('(function(require,module,exports){' + javascript + '\n})', context, { filename })(
-    id => { if (id === 'react') return react; if (id === './App.css') return {}; throw new Error('Unexpected import: ' + id); },
+    id => { if (id === 'react') return react; if (id === './styles/App.css') return {}; throw new Error('Unexpected import: ' + id); },
     module, module.exports,
   );
   const render = () => { index = 0; const tree = module.exports.default(); mounting = false; return tree; };

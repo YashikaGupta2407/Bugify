@@ -1,6 +1,6 @@
 // backend/src/controllers/submissionController.js
 // Handles submissions: execution, error classification, AI bug explanations, persistence, and history retrieval.
-const prisma = require('../prisma');
+const prisma = require('../config/prisma');
 const { executeCode } = require('../services/codeExecutionService');
 const { classifyResult } = require('../services/errorClassifier');
 const { generateExplanation } = require('../services/aiExplanationService');
