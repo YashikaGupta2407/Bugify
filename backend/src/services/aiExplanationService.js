@@ -583,6 +583,7 @@ function buildRuleBasedAnalysis({
   // Run fix validation
   const validation = validateFix({
     language,
+    codeContext,
     originalCode,
     correctedCode,
     status,
@@ -762,6 +763,7 @@ Return ONLY valid JSON matching this schema:
         // Run validation pipeline on generated fix
         const validation = validateFix({
           language: lang,
+          codeContext: safeCodeContext,
           originalCode,
           correctedCode,
           status,

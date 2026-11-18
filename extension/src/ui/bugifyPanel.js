@@ -266,7 +266,13 @@ class BugifyPanel {
             const changeDetail = changes && changes.length > 0 && changes[0].before
                 ? `BEFORE:\n${changes[0].before}\n\nAFTER:\n${changes[0].after}`
                 : `BEFORE:\n${docLine.text}\n\nAFTER:\n${correctedCode}`;
-            const choice = await vscode.window.showInformationMessage(`Apply Bugify fix to ${filePath || 'file'} at line ${lineNum}?`, { modal: true, detail: changeDetail }, 'Apply Fix', 'Cancel');
+            const checked = this.state.analysis?.validation;
+            const verificationText = checked?.checkStatus === 'VERIFIED' && checked?.scope === 'full_file'
+                ? 'Full file checker verified this suggestion.'
+                : checked?.checkStatus === 'SYNTAX_CHECKED'
+                    ? 'Syntax checked only — not verified.'
+                    : 'Suggestion not verified.';
+            const choice = await vscode.window.showInformationMessage(`Apply Bugify suggestion to ${filePath || 'file'} at line ${lineNum}?`, { modal: true, detail: `${verificationText}\n\n${changeDetail}` }, 'Apply Fix', 'Cancel');
             if (choice !== 'Apply Fix') {
                 return;
             }
@@ -1041,13 +1047,16 @@ class BugifyPanel {
                 const whyItHappened = analysis?.whyItHappens || analysis?.explanation || 'Compilation or runtime failed to satisfy safety invariants.';
                 const hasSafeFix = !!analysis?.correctedCode && analysis?.status === 'fixed';
                 const recommendedActionText = hasSafeFix
-                    ? (analysis?.explanation || 'Apply the corrected code fix to resolve the diagnostic.')
+                    ? (analysis?.explanation || 'Review the proposed code change and its verification status before applying.')
                     : (analysis?.suggestion || analysis?.explanation || 'Inspect the referenced line and update declarations or imports.');
                 // Verification & Confidence (Strict: Only VERIFIED if genuinely validated)
-                const isVerified = analysis?.verificationStatus === 'VERIFIED' || analysis?.validation?.status === 'validated';
+                const isVerified = analysis?.validation?.checkStatus === 'VERIFIED' && analysis?.validation?.scope === 'full_file';
+                const isSyntaxChecked = analysis?.validation?.checkStatus === 'SYNTAX_CHECKED';
                 const verificationText = isVerified
                     ? 'FIX VERIFIED'
-                    : hasSafeFix
+                    : isSyntaxChecked
+                        ? 'SYNTAX CHECKED — NOT VERIFIED'
+                        : hasSafeFix
                         ? 'FIX GENERATED — NOT VERIFIED'
                         : 'NOT VERIFIED';
                 const verificationClass = isVerified ? 'verified' : 'unverified';

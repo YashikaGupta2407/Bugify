@@ -7,6 +7,7 @@
  */
 
 const { spawnSync } = require('child_process');
+const path = require('path');
 
 let ts;
 try {
@@ -26,127 +27,122 @@ try {
  * @param {Object} [params.diagnostic] - Diagnostic information
  * @returns {Object} Validation report: { status, message, checkerUsed }
  */
-function validateFix({ language = 'plaintext', originalCode, correctedCode, status = 'fixed', diagnostic }) {
-  if (status === 'needs_context') {
-    return {
-      status: 'needs_context',
-      message: 'More workspace context is required to safely validate a fix.',
-      checkerUsed: 'context-checker',
+/**
+ * Recheck a supplied full file without executing it. Diagnostic coordinates are
+ * 1-based; the end position is exclusive. Compiler character offsets are 0-based.
+ * This establishes full_file evidence, not a project-wide or runtime guarantee.
+ */
+function checkFullFile(ts, { filePath, fileContent, originalCode, correctedCode, diagnostic }) {
+    const report = (status, checkStatus, message) => ({
+        status, checkStatus, scope: 'full_file',
+        verificationStatus: checkStatus === 'UNVERIFIED' ? 'NOT_VERIFIED' : checkStatus,
+        message, checkerUsed: 'typescript-checker',
+    });
+    const line = diagnostic?.startLine;
+    const column = diagnostic?.startColumn;
+    const code = Number(String(diagnostic?.code || '').replace(/^TS/i, ''));
+    if (!Number.isInteger(line) || line < 1 || !Number.isInteger(column) || column < 1 || !code || !originalCode) {
+        return report('generated', 'SYNTAX_CHECKED', 'Syntax checked; original diagnostic coordinates are unavailable.');
+    }
+    const fileName = path.resolve(filePath);
+    const source = ts.createSourceFile(fileName, fileContent, ts.ScriptTarget.Latest, true);
+    const starts = source.getLineStarts();
+    if (line > starts.length) {
+        return report('needs_context', 'UNVERIFIED', 'Original diagnostic is outside the supplied full file.');
+    }
+    const lineStart = starts[line - 1];
+    const lineEnd = starts[line] ?? fileContent.length;
+    const targetStart = lineStart + column - 1;
+    if (targetStart > lineEnd) return report('needs_context', 'UNVERIFIED', 'Original diagnostic column is outside the file line.');
+    const endLine = diagnostic.endLine ?? line;
+    const endColumn = diagnostic.endColumn ?? column + 1;
+    if (!Number.isInteger(endLine) || endLine < line || endLine > starts.length || !Number.isInteger(endColumn) || endColumn < 1) {
+        return report('needs_context', 'UNVERIFIED', 'Original diagnostic end position is invalid.');
+    }
+    const targetEnd = starts[endLine - 1] + endColumn - 1;
+    let patchStart = fileContent.indexOf(originalCode);
+    while (patchStart >= 0 && !(patchStart <= targetStart && targetStart < patchStart + originalCode.length)) {
+        patchStart = fileContent.indexOf(originalCode, patchStart + 1);
+    }
+    if (patchStart < 0) return report('needs_context', 'UNVERIFIED', 'Original code does not match the diagnostic location in the full file.');
+    const patchedContent = fileContent.slice(0, patchStart) + correctedCode + fileContent.slice(patchStart + originalCode.length);
+    const options = {
+        noEmit: true, strict: true, allowJs: true, checkJs: true,
+        skipLibCheck: true, types: [], target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10,
     };
-  }
-
-  if (status === 'cannot_fix' || !correctedCode || !correctedCode.trim()) {
-    return {
-      status: 'cannot_fix',
-      message: 'No corrected code was provided to validate.',
-      checkerUsed: 'null-checker',
+    function errors(content) {
+        const host = ts.createCompilerHost(options);
+        const readFile = host.readFile.bind(host);
+        const fileExists = host.fileExists.bind(host);
+        host.readFile = name => path.resolve(name) === fileName ? content : readFile(name);
+        host.fileExists = name => path.resolve(name) === fileName || fileExists(name);
+        const program = ts.createProgram([fileName], options, host);
+        return ts.getPreEmitDiagnostics(program).filter(d => d.category === ts.DiagnosticCategory.Error);
+    }
+    const before = errors(fileContent);
+    const atTarget = d => d.code === code && d.file && path.resolve(d.file.fileName) === fileName &&
+        d.start >= targetStart && d.start < Math.max(targetStart + 1, targetEnd);
+    if (!before.some(atTarget)) {
+        return report('generated', 'SYNTAX_CHECKED', 'Syntax checked; the supplied original diagnostic could not be reproduced at its location.');
+    }
+    const after = errors(patchedContent);
+    if (after.some(atTarget)) return report('validation_failed', 'UNVERIFIED', 'The original diagnostic remains after checking the patched full file.');
+    const delta = correctedCode.length - originalCode.length;
+    const fingerprint = (d, patched) => {
+        let start = d.start;
+        if (patched && d.file && path.resolve(d.file.fileName) === fileName && start >= patchStart + correctedCode.length) start -= delta;
+        return JSON.stringify([d.file?.fileName, d.code, start, ts.flattenDiagnosticMessageText(d.messageText, '\n')]);
     };
+    const remaining = new Map();
+    for (const d of before) { const key = fingerprint(d, false); remaining.set(key, (remaining.get(key) || 0) + 1); }
+    for (const d of after) {
+        const key = fingerprint(d, true);
+        if (!remaining.get(key)) return report('validation_failed', 'UNVERIFIED', 'The patched full file introduces a new checker error.');
+        remaining.set(key, remaining.get(key) - 1);
+    }
+    return report('validated', 'VERIFIED', 'Full file checker rerun: the original diagnostic is gone and no new errors were introduced.');
+}
+function validateFix({ language = 'plaintext', originalCode, correctedCode, status = 'fixed', diagnostic, filePath, fullFileContent, codeContext }) {
+  const scope = typeof fullFileContent === 'string' ? 'full_file' : typeof codeContext === 'string' ? 'code_window' : 'snippet';
+  const report = (status, checkStatus, message, checkerUsed = 'context-checker') => ({
+    status, checkStatus, scope, message, checkerUsed,
+    verificationStatus: checkStatus === 'UNVERIFIED' ? 'NOT_VERIFIED' : checkStatus,
+  });
+  if (String(status).toLowerCase() === 'needs_context') return report('needs_context', 'UNVERIFIED', 'More context is required to propose a repair.');
+  if (status === 'cannot_fix' || !correctedCode || !correctedCode.trim()) return report('cannot_fix', 'UNVERIFIED', 'No replacement code is available.');
+  if (/\/\/\s*@ts-(ignore|nocheck)|\bas\s+any\b|\/\*\s*eslint-disable/.test(correctedCode)) {
+    return report('validation_failed', 'UNVERIFIED', 'Replacement uses type suppression instead of fixing the root cause.', 'quality-linter');
   }
-
   const lang = language.toLowerCase();
-
-  // 1. Anti-pattern detection (suppression instead of fixing)
-  const hasSuppression =
-    /\/\/\s*@ts-ignore/i.test(correctedCode) ||
-    /\/\/\s*@ts-nocheck/i.test(correctedCode) ||
-    /\/\*\s*eslint-disable/i.test(correctedCode) ||
-    /\bas\s+any\b/.test(correctedCode);
-
-  if (hasSuppression) {
-    return {
-      status: 'validation_failed',
-      message: 'Fix uses type suppression or error silencing (@ts-ignore / as any) instead of fixing the root cause.',
-      checkerUsed: 'quality-linter',
-    };
-  }
-
-  // 2. TypeScript / JavaScript validation
-  if (lang === 'typescript' || lang === 'javascript') {
-    if (ts) {
-      try {
-        const isTs = lang === 'typescript';
-        const fileName = isTs ? 'validation_target.ts' : 'validation_target.js';
-        const sourceFile = ts.createSourceFile(
-          fileName,
-          correctedCode,
-          ts.ScriptTarget.ESNext,
-          true,
-          isTs ? ts.ScriptKind.TS : ts.ScriptKind.JS
-        );
-
-        const parseErrors = sourceFile.parseDiagnostics || [];
-        if (parseErrors.length > 0) {
-          const firstErr = parseErrors[0];
-          const errorMsg =
-            typeof firstErr.messageText === 'string'
-              ? firstErr.messageText
-              : firstErr.messageText?.messageText || 'Syntax error in replacement code';
-
-          return {
-            status: 'validation_failed',
-            message: `Syntax validation failed: ${errorMsg}`,
-            checkerUsed: 'typescript-parser',
-          };
-        }
-
-        return {
-          status: 'validated',
-          message: 'Syntax and AST structure verified against TypeScript parser',
-          checkerUsed: 'typescript-parser',
-        };
-      } catch (err) {
-        return {
-          status: 'generated',
-          message: `AST validation encountered an error: ${err.message}`,
-          checkerUsed: 'typescript-fallback',
-        };
+  if (['typescript', 'javascript', 'typescriptreact', 'javascriptreact'].includes(lang) && ts) {
+    try {
+      const fileName = filePath || (lang.startsWith('typescript') ? 'validation_target.ts' : 'validation_target.js');
+      const kind = lang.startsWith('typescript') ? ts.ScriptKind.TSX : ts.ScriptKind.JSX;
+      const sourceFile = ts.createSourceFile(fileName, correctedCode, ts.ScriptTarget.Latest, true, kind);
+      if (sourceFile.parseDiagnostics.length) return report('validation_failed', 'UNVERIFIED', 'Syntax error in replacement code.', 'typescript-parser');
+      if (typeof fullFileContent === 'string') {
+        return checkFullFile(ts, { filePath: fileName, fileContent: fullFileContent, originalCode, correctedCode, diagnostic });
       }
+      return report('generated', 'SYNTAX_CHECKED', 'Syntax checked only; no full file was supplied.', 'typescript-parser');
+    } catch (err) {
+      return report('generated', 'UNVERIFIED', 'Checker unavailable: ' + err.message, 'typescript-fallback');
     }
   }
-
-  // 3. Python syntax validation via AST
   if (lang === 'python') {
     try {
       const res = spawnSync('python3', ['-c', 'import ast, sys; ast.parse(sys.stdin.read())'], {
-        input: correctedCode,
-        encoding: 'utf8',
-        timeout: 2500,
+        input: correctedCode, encoding: 'utf8', timeout: 2500,
       });
-
-      if (res.status !== 0) {
-        const stderr = (res.stderr || '').trim();
-        const syntaxMatch = stderr.match(/SyntaxError: (.*)/);
-        const reason = syntaxMatch ? syntaxMatch[1] : 'Invalid Python syntax in corrected code';
-
-        return {
-          status: 'validation_failed',
-          message: `Python syntax check failed: ${reason}`,
-          checkerUsed: 'python3-ast',
-        };
-      }
-
-      return {
-        status: 'validated',
-        message: 'Python AST syntax parsing verified cleanly',
-        checkerUsed: 'python3-ast',
-      };
-    } catch (err) {
-      return {
-        status: 'generated',
-        message: 'Python syntax validator unavailable',
-        checkerUsed: 'python3-fallback',
-      };
+      if (res.error) return report('generated', 'UNVERIFIED', 'Python syntax parser unavailable.', 'python3-fallback');
+      if (res.status !== 0) return report('validation_failed', 'UNVERIFIED', 'Python syntax check failed.', 'python3-ast');
+      // Only the replacement was parsed: do not claim to have checked a full file.
+      return { ...report('generated', 'SYNTAX_CHECKED', 'Python syntax checked only; no diagnostic checker was rerun.', 'python3-ast'), scope: 'snippet' };
+    } catch {
+      return report('generated', 'UNVERIFIED', 'Python syntax parser unavailable.', 'python3-fallback');
     }
   }
-
-  // 4. Default for other languages
-  return {
-    status: 'generated',
-    message: 'Fix generated — full compiler validation unavailable for this language',
-    checkerUsed: 'heuristic',
-  };
+  return report('generated', 'UNVERIFIED', 'No checker rerun is available for this language.', 'heuristic');
 }
 
-module.exports = {
-  validateFix,
-};
+module.exports = { validateFix };

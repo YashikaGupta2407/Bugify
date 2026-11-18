@@ -146,6 +146,7 @@ async function analyzeDiagnostic(req, res, next) {
       explanation: analysis.explanation,
       confidence: analysis.confidence || 0.9,
       validation: analysis.validation || { status: 'generated', message: 'Analysis generated' },
+      verificationStatus: analysis.validation?.verificationStatus || 'NOT_VERIFIED',
       severity: analysis.severity,
       // Backward compatibility
       cause: analysis.cause || analysis.rootCause,

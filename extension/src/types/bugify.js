@@ -27,6 +27,8 @@
 
 /**
  * @typedef {Object} FixValidationResult
+ * @property {'VERIFIED' | 'SYNTAX_CHECKED' | 'UNVERIFIED'} [checkStatus]
+ * @property {'full_file' | 'code_window' | 'snippet'} [scope]
  * @property {'validated' | 'generated' | 'needs_context' | 'validation_failed' | 'cannot_fix'} status
  * @property {string} message
  * @property {string} [checkerUsed]
@@ -78,7 +80,7 @@
  * @property {string} explanation
  * @property {number} confidence
  * @property {'HIGH' | 'MEDIUM' | 'LOW'} [confidenceLevel]
- * @property {'VERIFIED' | 'NOT_VERIFIED'} [verificationStatus]
+ * @property {'VERIFIED' | 'SYNTAX_CHECKED' | 'NOT_VERIFIED'} [verificationStatus]
  * @property {FixValidationResult} validation
  * @property {'error' | 'warning' | 'info' | 'information' | 'hint'} [severity]
  * @property {string} [cause]
