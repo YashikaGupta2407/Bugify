@@ -38,7 +38,7 @@ async function createSubmission(req, res, next) {
       });
     }
 
-    // 2. Look up language and demo user in database
+    // 2. Look up the language. Ownership comes from the authenticated session.
     const languageRecord = await prisma.language.findFirst({
       where: {
         name: {
@@ -52,17 +52,6 @@ async function createSubmission(req, res, next) {
       return res.status(400).json({
         success: false,
         message: `Language '${language}' is not registered in the database.`,
-      });
-    }
-
-    const demoUser = await prisma.user.findUnique({
-      where: { email: 'demo@bugify.dev' },
-    });
-
-    if (!demoUser) {
-      return res.status(500).json({
-        success: false,
-        message: 'Demo user not found. Please run the database seed.',
       });
     }
 
@@ -110,7 +99,7 @@ async function createSubmission(req, res, next) {
       // Create submission
       const submission = await tx.submission.create({
         data: {
-          userId: demoUser.id,
+          userId: req.user.id,
           languageId: languageRecord.id,
           code,
         },
@@ -158,9 +147,9 @@ async function createSubmission(req, res, next) {
       }
 
       await tx.userProgress.upsert({
-        where: { userId: demoUser.id },
+          where: { userId: req.user.id },
         create: {
-          userId: demoUser.id,
+          userId: req.user.id,
           totalSubmissions: 1,
           successfulSubmissions: isSuccess ? 1 : 0,
           failedSubmissions: isSuccess ? 0 : 1,
@@ -210,16 +199,8 @@ async function createSubmission(req, res, next) {
  */
 async function getSubmissions(req, res, next) {
   try {
-    const demoUser = await prisma.user.findUnique({
-      where: { email: 'demo@bugify.dev' },
-    });
-
-    if (!demoUser) {
-      return res.status(200).json([]);
-    }
-
     const submissions = await prisma.submission.findMany({
-      where: { userId: demoUser.id },
+      where: { userId: req.user.id },
       orderBy: { createdAt: 'desc' },
       take: 50,
       include: {
@@ -262,8 +243,8 @@ async function getSubmissionById(req, res, next) {
       });
     }
 
-    const submission = await prisma.submission.findUnique({
-      where: { id },
+    const submission = await prisma.submission.findFirst({
+      where: { id, userId: req.user.id },
       include: {
         language: true,
         result: {

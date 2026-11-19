@@ -300,9 +300,10 @@ Example:
 ```env
 DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/bugify"
 PORT=5000
+AUTH_SECRET="replace-with-a-random-secret-at-least-32-characters-long"
 ```
 
-Never commit your actual `.env` file.
+Use a unique random `AUTH_SECRET` for each deployment. Production startup rejects a missing or short secret. Never commit your actual `.env` file.
 
 ---
 
@@ -352,6 +353,14 @@ npm run dev
 ```
 
 The frontend will be available at the Vite development URL shown in the terminal.
+
+## Website pages and APIs
+
+The website has three routes: `/` (Home), `/login` (sign in or create an account with `?mode=signup`), and `/analytics` (protected Error Analytics). Accounts are created through `POST /api/auth/register`; sign-in uses `POST /api/auth/login`. The backend stores passwords as salted scrypt hashes and issues a signed HTTP-only session cookie. `GET /api/auth/me` checks the session and `POST /api/auth/logout` clears it.
+
+`GET /api/analytics/errors?range=7d|30d|90d|all` requires a valid session. An analytics error is one `SubmissionResult` whose `status` is not `success`; its date is `SubmissionResult.createdAt`. Successful runs are excluded. Language and error-type counts are grouped from these result rows, each counted once, and filtered through the owning authenticated user's submissions. `all` applies no start-date limit. Error types use the stored `errorType`; missing values are reported as `Other`.
+
+The analytics indexes are in a new Prisma migration. Apply pending migrations before running the website against a database with `npx prisma migrate dev` during local development or `npx prisma migrate deploy` in a deployed environment.
 
 ---
 

@@ -1,11 +1,14 @@
 // backend/src/routes/submissionRoutes.js
 const express = require('express');
 const router = express.Router();
+const requireAuth = require('../middleware/requireAuth');
 const {
   createSubmission,
   getSubmissions,
   getSubmissionById,
 } = require('../controllers/submissionController');
+
+router.use(requireAuth);
 
 // POST /api/submissions - Submit code for execution, error classification, and AI explanation
 router.post('/', createSubmission);

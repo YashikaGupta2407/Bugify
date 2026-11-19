@@ -53,6 +53,8 @@ model Submission {
   problem     Problem?          @relation(fields: [problemId], references: [id])
   language    Language          @relation(fields: [languageId], references: [id])
   result      SubmissionResult?
+
+  @@index([userId, languageId])
 }
 
 model SubmissionResult {
@@ -70,6 +72,8 @@ model SubmissionResult {
 
   submission    Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
   explanation   DebuggingExplanation?
+
+  @@index([status, createdAt])
 }
 
 model DebuggingExplanation {

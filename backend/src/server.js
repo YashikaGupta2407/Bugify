@@ -5,6 +5,8 @@ const cors = require('cors');
 
 const submissionRoutes = require('./routes/submissionRoutes');
 const extensionRoutes = require('./routes/extensionRoutes');
+const authRoutes = require('./routes/authRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 const errorHandler = require('./middleware/errorHandler');
 const notFoundHandler = require('./middleware/notFoundHandler');
 
@@ -27,6 +29,8 @@ app.get('/api/health', (req, res) => {
 // API Routes
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/extension', extensionRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // 404 Handler for undefined routes
 app.use(notFoundHandler);
