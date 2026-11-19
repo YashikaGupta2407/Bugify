@@ -1,20 +1,26 @@
 // prisma/seed.js
 // Seeds initial demonstration data required for the Bugify MVP.
 const { PrismaClient } = require('@prisma/client');
+const { hashPassword } = require('../src/services/authService');
+
+const demoPassword = process.env.DEMO_USER_PASSWORD;
+if (typeof demoPassword !== 'string' || demoPassword.trim().length === 0) {
+  throw new Error('DEMO_USER_PASSWORD must be set to a nonempty value before seeding.');
+}
+
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('Starting Bugify database seeding...');
 
   // 1. Seed Demo User
-  // DEV-ONLY: Plain placeholder password for development prior to authentication system implementation.
   const demoUser = await prisma.user.upsert({
     where: { email: 'demo@bugify.dev' },
     update: {},
     create: {
       name: 'Demo User',
       email: 'demo@bugify.dev',
-      password: 'dev_placeholder_password_not_for_production',
+      password: await hashPassword(demoPassword),
     },
   });
   console.log(`Demo user ready: ${demoUser.email} (ID: ${demoUser.id})`);
@@ -35,7 +41,7 @@ async function main() {
   // 3. Seed Languages (Python and JavaScript)
   const python = await prisma.language.upsert({
     where: { name: 'python' },
-    update: { version: '3.10' },
+    update: {},
     create: {
       name: 'python',
       version: '3.10',
@@ -44,7 +50,7 @@ async function main() {
 
   const javascript = await prisma.language.upsert({
     where: { name: 'javascript' },
-    update: { version: 'ES2022' },
+    update: {},
     create: {
       name: 'javascript',
       version: 'ES2022',
