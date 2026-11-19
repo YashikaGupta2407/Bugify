@@ -169,6 +169,7 @@ async function createSubmissionHandler(req, res, next, {
 
       return {
         submissionId: submission.id,
+        executionSource: rawExecution.executionSource,
         status: submissionResult.status,
         errorType: submissionResult.errorType,
         errorMessage: submissionResult.errorMessage,
@@ -195,6 +196,7 @@ async function createSubmissionHandler(req, res, next, {
         output: transactionResult.output,
         executionTime: transactionResult.executionTime,
         submissionId: transactionResult.submissionId,
+        executionSource: transactionResult.executionSource,
       },
       explanation: transactionResult.explanation,
     });

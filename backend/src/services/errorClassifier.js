@@ -70,6 +70,7 @@ function isConsistentJudge0Status(statusId, description) {
  * @returns {Object} Classified result
  */
 function classifyResult(executionResult) {
+  const executionSource = executionResult?.executionSource;
   const infrastructureFailure = (message) => ({
     status: 'PROVIDER_ERROR',
     isInfrastructureFailure: true,
@@ -77,6 +78,7 @@ function classifyResult(executionResult) {
     errorMessage: message,
     output: '',
     executionTime: 0,
+    ...(executionSource ? { executionSource } : {}),
   });
 
   if (!executionResult || typeof executionResult !== 'object' || Array.isArray(executionResult)) {
@@ -96,6 +98,38 @@ function classifyResult(executionResult) {
 
   if (isInfrastructureFailure === true || ['PROVIDER_ERROR', 'PENDING', 'TIMEOUT'].includes(externalStatus)) {
     return infrastructureFailure(message || 'Execution provider did not return a completed code result.');
+  }
+
+  if (executionSource === 'local_fallback') {
+    const supportedFallbackErrors = new Set([
+      ErrorTypes.ZERO_DIVISION_ERROR,
+      ErrorTypes.NAME_ERROR,
+      ErrorTypes.SYNTAX_ERROR,
+    ]);
+    if (
+      externalStatus !== 'error' ||
+      !supportedFallbackErrors.has(executionResult.errorType) ||
+      typeof executionResult.errorMessage !== 'string' ||
+      typeof executionResult.output !== 'string' ||
+      typeof executionResult.executionTime !== 'number' ||
+      !Number.isFinite(executionResult.executionTime) ||
+      executionResult.executionTime < 0
+    ) {
+      return infrastructureFailure('Local fallback did not identify a supported user-code error.');
+    }
+
+    return {
+      status: 'error',
+      errorType: executionResult.errorType,
+      errorMessage: executionResult.errorMessage,
+      output: executionResult.output,
+      executionTime: executionResult.executionTime,
+      executionSource,
+    };
+  }
+
+  if (executionSource != null && executionSource !== 'judge0') {
+    return infrastructureFailure('Execution provider returned an unknown execution source.');
   }
   if (externalStatus != null && typeof externalStatus !== 'string') {
     return infrastructureFailure('Execution provider returned a malformed status.');

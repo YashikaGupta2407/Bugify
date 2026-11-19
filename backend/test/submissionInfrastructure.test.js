@@ -67,6 +67,12 @@ describe('submission infrastructure failures', () => {
       { status: 'PROVIDER_ERROR', isInfrastructureFailure: true, message: 'provider unavailable' },
       { status: 'Internal Error', statusId: 13, message: 'provider internal error' },
       { status: 'Processing', statusId: 2 },
+      {
+        status: 'success',
+        executionSource: 'local_fallback',
+        output: 'Mock execution: no errors detected',
+        executionTime: 0,
+      },
     ];
 
     for (const rawExecution of outcomes) {
@@ -80,8 +86,11 @@ describe('submission infrastructure failures', () => {
   });
 
   test('preserves accepted-success and status ID 5 user-code progress behavior', async () => {
-    const success = await submitWith({ status: 'Accepted', statusId: 3, stdout: '1\n', executionTime: 0.01 });
+    const success = await submitWith({
+      status: 'Accepted', statusId: 3, stdout: '1\n', executionTime: 0.01, executionSource: 'judge0',
+    });
     assert.equal(success.response.statusCode, 200);
+    assert.equal(success.response.body.result.executionSource, 'judge0');
     assert.equal(success.calls.progress[0].update.successfulSubmissions.increment, 1);
 
     const timeLimit = await submitWith({
@@ -93,5 +102,19 @@ describe('submission infrastructure failures', () => {
     assert.equal(classifyResult({
       status: 'Time Limit Exceeded', statusId: 5, executionTime: 5,
     }).errorType, 'TIME_LIMIT');
+
+    const fallbackError = await submitWith({
+      status: 'error',
+      errorType: 'ZERO_DIVISION_ERROR',
+      errorMessage: 'division by zero',
+      output: '',
+      executionTime: 0,
+      executionSource: 'local_fallback',
+    });
+    assert.equal(fallbackError.response.statusCode, 200);
+    assert.equal(fallbackError.response.body.result.errorType, 'ZERO_DIVISION_ERROR');
+    assert.equal(fallbackError.response.body.result.executionSource, 'local_fallback');
+    assert.equal(fallbackError.calls.progress[0].update.failedSubmissions.increment, 1);
+    assert.equal(fallbackError.calls.progress[0].update.successfulSubmissions, undefined);
   });
 });

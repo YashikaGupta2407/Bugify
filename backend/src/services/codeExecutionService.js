@@ -12,6 +12,15 @@ const LANGUAGE_MAP = {
   python: 92, // Python (3.11.2) on Judge0 CE
 };
 const { isConsistentJudge0Status } = require('./errorClassifier');
+const { executeCode: executeLocalFallback } = require('./executionService');
+
+const FALLBACK_ERROR_TYPES = Object.freeze({
+  ZeroDivisionError: 'ZERO_DIVISION_ERROR',
+  NameError: 'NAME_ERROR',
+  SyntaxError: 'SYNTAX_ERROR',
+});
+
+class ProviderUnavailableError extends Error {}
 
 /**
  * Executes source code via the external Judge0 service.
@@ -24,6 +33,8 @@ const { isConsistentJudge0Status } = require('./errorClassifier');
  */
 function createCodeExecutionService({
   fetchImplementation = (...args) => fetch(...args),
+  fallbackImplementation = executeLocalFallback,
+  judge0Enabled,
   maxPollAttempts = 10,
   pollIntervalMs = 800,
   requestTimeoutMs = 15000,
@@ -34,6 +45,45 @@ function createCodeExecutionService({
 
     if (!languageId) {
       throw new Error(`Unsupported execution language: '${language}'. Supported languages: ${Object.keys(LANGUAGE_MAP).join(', ')}`);
+    }
+
+    async function useLocalFallback(message) {
+      try {
+        const result = await fallbackImplementation({ code, language: normalizedLang, stdin });
+        const errorType = FALLBACK_ERROR_TYPES[result?.errorType];
+        if (
+          result?.status !== 'error' ||
+          !errorType ||
+          typeof result.errorMessage !== 'string' ||
+          !Number.isFinite(result.executionTime)
+        ) {
+          return infrastructureFailure(
+            'Judge0 was unavailable and the local fallback could not identify a supported error.',
+            'local_fallback'
+          );
+        }
+
+        return {
+          status: 'error',
+          errorType,
+          errorMessage: result.errorMessage,
+          output: typeof result.output === 'string' ? result.output : '',
+          executionTime: result.executionTime,
+          executionSource: 'local_fallback',
+        };
+      } catch {
+        return infrastructureFailure(
+          message || 'Judge0 was unavailable and the local fallback failed.',
+          'local_fallback'
+        );
+      }
+    }
+
+    const providerEnabled = judge0Enabled === undefined
+      ? String(process.env.JUDGE0_ENABLED || '').trim().toLowerCase() !== 'false'
+      : judge0Enabled !== false;
+    if (!providerEnabled) {
+      return useLocalFallback('Judge0 is disabled.');
     }
 
     const baseUrl = (process.env.JUDGE0_API_URL || 'https://ce.judge0.com').replace(/\/+$/, '');
@@ -83,12 +133,30 @@ function createCodeExecutionService({
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
       try {
-        const response = await fetchImplementation(url, { ...options, signal: controller.signal });
+        let response;
+        try {
+          response = await fetchImplementation(url, { ...options, signal: controller.signal });
+        } catch (error) {
+          throw new ProviderUnavailableError(error.message || 'Judge0 network request failed.');
+        }
         const data = response.ok ? await response.json() : null;
         return { response, data };
+      } catch (error) {
+        if (controller.signal.aborted || error.name === 'AbortError') {
+          throw new ProviderUnavailableError('Judge0 request timed out.');
+        }
+        throw error;
       } finally {
         clearTimeout(timeout);
       }
+    }
+
+    function handleHttpFailure(response, context) {
+      const message = `Judge0 ${context} failed with status ${response.status}`;
+      if (response.status === 429 || response.status >= 500) {
+        return useLocalFallback(message);
+      }
+      return Promise.resolve(infrastructureFailure(message, 'judge0'));
     }
 
     try {
@@ -100,13 +168,13 @@ function createCodeExecutionService({
       });
 
       if (!response.ok) {
-        throw new Error(`Judge0 API request failed with status ${response.status}`);
+        return handleHttpFailure(response, 'API request');
       }
 
       let data = submittedData;
       validateResponse(data);
       if (data.status.id === 13) {
-        return infrastructureFailure(data.message || data.status.description);
+        return useLocalFallback(data.message || data.status.description);
       }
 
       // Judge0 status 1/2 means the provider has not returned a code result yet.
@@ -120,18 +188,18 @@ function createCodeExecutionService({
           if (pollIntervalMs > 0) await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
           const { response: pollResponse, data: polledData } = await fetchProvider(`${baseUrl}/submissions/${token}`, { headers });
           if (!pollResponse.ok) {
-            throw new Error(`Judge0 polling request failed with status ${pollResponse.status}`);
+            return handleHttpFailure(pollResponse, 'polling request');
           }
           data = polledData;
           validateResponse(data);
           if (data.status.id === 13) {
-            return infrastructureFailure(data.message || data.status.description);
+            return useLocalFallback(data.message || data.status.description);
           }
           if (data.status.id !== 1 && data.status.id !== 2) break;
         }
 
         if (data.status.id === 1 || data.status.id === 2) {
-          return infrastructureFailure('Execution provider did not finish processing the request.');
+          return useLocalFallback('Execution provider did not finish processing the request.');
         }
       }
 
@@ -144,18 +212,23 @@ function createCodeExecutionService({
         message: data.message || null,
         executionTime: data.time ? parseFloat(data.time) : 0,
         memory: data.memory ? parseFloat(data.memory) : null,
+        executionSource: 'judge0',
       };
     } catch (error) {
-      return infrastructureFailure(error.message || 'Execution provider request failed.');
+      if (error instanceof ProviderUnavailableError) {
+        return useLocalFallback(error.message);
+      }
+      return infrastructureFailure(error.message || 'Execution provider request failed.', 'judge0');
     }
   };
 }
 
-function infrastructureFailure(message) {
+function infrastructureFailure(message, executionSource = 'judge0') {
   return {
     status: 'PROVIDER_ERROR',
     isInfrastructureFailure: true,
     message,
+    executionSource,
     stdout: null,
     stderr: null,
     compileOutput: null,
