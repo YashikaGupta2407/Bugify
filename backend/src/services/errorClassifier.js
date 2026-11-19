@@ -33,6 +33,29 @@ const ErrorTypes = {
   UNKNOWN_ERROR: 'UNKNOWN_ERROR',
 };
 
+const JUDGE0_STATUS_DESCRIPTIONS = Object.freeze({
+  1: 'In Queue',
+  2: 'Processing',
+  3: 'Accepted',
+  4: 'Wrong Answer',
+  5: 'Time Limit Exceeded',
+  6: 'Compilation Error',
+  7: 'Runtime Error (SIGSEGV)',
+  8: 'Runtime Error (SIGXFSZ)',
+  9: 'Runtime Error (SIGFPE)',
+  10: 'Runtime Error (SIGABRT)',
+  11: 'Runtime Error (NZEC)',
+  12: 'Runtime Error (Other)',
+  13: 'Internal Error',
+  14: 'Exec Format Error',
+});
+
+function isConsistentJudge0Status(statusId, description) {
+  const expected = JUDGE0_STATUS_DESCRIPTIONS[statusId];
+  return Number.isInteger(statusId) && typeof description === 'string' && Boolean(expected) &&
+    description.trim().toLowerCase() === expected.toLowerCase();
+}
+
 /**
  * Classifies the raw execution result into standardized Bugify format.
  * 
@@ -47,7 +70,21 @@ const ErrorTypes = {
  * @returns {Object} Classified result
  */
 function classifyResult(executionResult) {
+  const infrastructureFailure = (message) => ({
+    status: 'PROVIDER_ERROR',
+    isInfrastructureFailure: true,
+    errorType: null,
+    errorMessage: message,
+    output: '',
+    executionTime: 0,
+  });
+
+  if (!executionResult || typeof executionResult !== 'object' || Array.isArray(executionResult)) {
+    return infrastructureFailure('Execution provider returned a malformed response.');
+  }
+
   const {
+    isInfrastructureFailure,
     status: externalStatus,
     statusId,
     stdout,
@@ -56,6 +93,28 @@ function classifyResult(executionResult) {
     message,
     executionTime = 0,
   } = executionResult;
+
+  if (isInfrastructureFailure === true || ['PROVIDER_ERROR', 'PENDING', 'TIMEOUT'].includes(externalStatus)) {
+    return infrastructureFailure(message || 'Execution provider did not return a completed code result.');
+  }
+  if (externalStatus != null && typeof externalStatus !== 'string') {
+    return infrastructureFailure('Execution provider returned a malformed status.');
+  }
+  if ([stdout, stderr, compileOutput, message].some((value) => value != null && typeof value !== 'string')) {
+    return infrastructureFailure('Execution provider returned malformed result fields.');
+  }
+  if (!isConsistentJudge0Status(statusId, externalStatus)) {
+    return infrastructureFailure('Execution provider returned an invalid or inconsistent status.');
+  }
+  if (statusId === 1 || statusId === 2) {
+    return infrastructureFailure('Execution provider is still processing the request.');
+  }
+  if (statusId === 13) {
+    return infrastructureFailure(message || 'Execution provider reported an internal error.');
+  }
+  if (typeof executionTime !== 'number' || !Number.isFinite(executionTime)) {
+    return infrastructureFailure('Execution provider returned an invalid execution time.');
+  }
 
   // 1. Time Limit Exceeded (Judge0 status 5)
   if (
@@ -281,6 +340,8 @@ function classifyDiagnostic({ message = '', source = '', code = '', language = '
 }
 
 module.exports = {
+  JUDGE0_STATUS_DESCRIPTIONS,
+  isConsistentJudge0Status,
   classifyResult,
   classifyDiagnostic,
   ErrorTypes,

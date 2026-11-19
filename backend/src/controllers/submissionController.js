@@ -1,6 +1,5 @@
 // backend/src/controllers/submissionController.js
 // Handles submissions: execution, error classification, AI bug explanations, persistence, and history retrieval.
-const prisma = require('../prisma');
 const { executeCode } = require('../services/codeExecutionService');
 const { classifyResult } = require('../services/errorClassifier');
 const { generateExplanation } = require('../services/aiExplanationService');
@@ -9,8 +8,13 @@ const { generateExplanation } = require('../services/aiExplanationService');
  * POST /api/submissions
  * Executes user code, classifies errors, generates AI explanation, and persists data.
  */
-async function createSubmission(req, res, next) {
+async function createSubmissionHandler(req, res, next, {
+  database = null,
+  runExecution = executeCode,
+  explain = generateExplanation,
+} = {}) {
   try {
+    const db = database || require('../prisma');
     const { code, language, stdin = '' } = req.body || {};
 
     // 1. Validate request body and input fields
@@ -39,7 +43,7 @@ async function createSubmission(req, res, next) {
     }
 
     // 2. Look up the language. Ownership comes from the authenticated session.
-    const languageRecord = await prisma.language.findFirst({
+    const languageRecord = await db.language.findFirst({
       where: {
         name: {
           equals: normalizedLanguage,
@@ -58,7 +62,7 @@ async function createSubmission(req, res, next) {
     // 3. Execute code via external execution service
     let rawExecution;
     try {
-      rawExecution = await executeCode({
+      rawExecution = await runExecution({
         code,
         language: normalizedLanguage,
         stdin,
@@ -73,13 +77,19 @@ async function createSubmission(req, res, next) {
 
     // 4. Classify execution result into Bugify categories
     const classified = classifyResult(rawExecution);
+    if (classified.isInfrastructureFailure) {
+      return res.status(503).json({
+        success: false,
+        message: 'Unable to execute code',
+      });
+    }
     const isSuccess = classified.status === 'success';
 
     // 5. Generate AI Explanation for errors only (never for clean success)
     let aiExplanation = null;
     if (!isSuccess && classified.errorType) {
       try {
-        aiExplanation = await generateExplanation({
+        aiExplanation = await explain({
           language: normalizedLanguage,
           code,
           errorType: classified.errorType,
@@ -95,7 +105,7 @@ async function createSubmission(req, res, next) {
     }
 
     // 6. Atomic persistence in PostgreSQL via Prisma transaction
-    const transactionResult = await prisma.$transaction(async (tx) => {
+    const transactionResult = await db.$transaction(async (tx) => {
       // Create submission
       const submission = await tx.submission.create({
         data: {
@@ -193,12 +203,15 @@ async function createSubmission(req, res, next) {
   }
 }
 
+const createSubmission = createSubmissionHandler;
+
 /**
  * GET /api/submissions
  * Retrieves debugging history list for the demo user.
  */
 async function getSubmissions(req, res, next) {
   try {
+    const prisma = require('../prisma');
     const submissions = await prisma.submission.findMany({
       where: { userId: req.user.id },
       orderBy: { createdAt: 'desc' },
@@ -235,6 +248,7 @@ async function getSubmissions(req, res, next) {
  */
 async function getSubmissionById(req, res, next) {
   try {
+    const prisma = require('../prisma');
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
       return res.status(400).json({
@@ -294,6 +308,7 @@ async function getSubmissionById(req, res, next) {
 
 module.exports = {
   createSubmission,
+  createSubmissionHandler,
   getSubmissions,
   getSubmissionById,
 };
