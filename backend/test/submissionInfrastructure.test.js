@@ -39,6 +39,64 @@ async function submitWith(rawExecution) {
 }
 
 describe('submission infrastructure failures', () => {
+  test('redacts secrets before AI explanation and persistence without changing executed code', async () => {
+    const dummyKey = 'sk-1234567890abcdefghijklmnopqrst';
+    const code = `api_key = '${dummyKey}'\nprint(10/0)`;
+    const redactedCode = "api_key = '[REDACTED]'\nprint(10/0)";
+    const recorded = {};
+    let executedCode;
+    let explainedCode;
+    const database = {
+      language: { findFirst: async () => ({ id: 7, name: 'python' }) },
+      $transaction: async (work) => work({
+        submission: { create: async ({ data }) => { recorded.submission = data; return { id: 301 }; } },
+        submissionResult: { create: async ({ data }) => ({ id: 401, ...data }) },
+        debuggingExplanation: { create: async ({ data }) => { recorded.explanation = data; return data; } },
+        userProgress: { upsert: async () => {} },
+      }),
+    };
+    const response = makeResponse();
+
+    await createSubmissionHandler(
+      { body: { code, language: 'python' }, user: { id: 9 } },
+      response,
+      (error) => { throw error; },
+      {
+        database,
+        runExecution: async ({ code: inputCode }) => {
+          executedCode = inputCode;
+          return {
+            status: 'error',
+            errorType: 'ZERO_DIVISION_ERROR',
+            errorMessage: 'division by zero',
+            output: '',
+            executionTime: 0,
+            executionSource: 'local_fallback',
+          };
+        },
+        explain: async ({ code: inputCode }) => {
+          explainedCode = inputCode;
+          return {
+            summary: 'Division by zero',
+            cause: 'The divisor is zero.',
+            location: 'print(10/0)',
+            explanation: 'Zero cannot be used as a divisor.',
+            suggestion: 'Use a nonzero divisor.',
+            correctedCode: 'print(10/1)',
+          };
+        },
+      },
+    );
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(executedCode, code);
+    assert.equal(explainedCode, redactedCode);
+    assert.equal(recorded.submission.code, redactedCode);
+    assert.equal(recorded.explanation.summary, 'Division by zero');
+    assert.equal(explainedCode.includes(dummyKey), false);
+    assert.equal(recorded.submission.code.includes(dummyKey), false);
+  });
+
   test('requires a matching Judge0 status ID and description', () => {
     assert.equal(isConsistentJudge0Status(3, 'Accepted'), true);
     assert.equal(isConsistentJudge0Status(5, 'Time Limit Exceeded'), true);

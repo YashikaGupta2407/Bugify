@@ -3,6 +3,7 @@
 const { executeCode } = require('../services/codeExecutionService');
 const { classifyResult } = require('../services/errorClassifier');
 const { generateExplanation } = require('../services/aiExplanationService');
+const { redactSecrets } = require('../services/redactService');
 
 /**
  * POST /api/submissions
@@ -31,6 +32,8 @@ async function createSubmissionHandler(req, res, next, {
         message: 'Language is required and cannot be empty',
       });
     }
+
+    const redactedCode = redactSecrets(code);
 
     const normalizedLanguage = language.trim().toLowerCase();
 
@@ -91,7 +94,7 @@ async function createSubmissionHandler(req, res, next, {
       try {
         aiExplanation = await explain({
           language: normalizedLanguage,
-          code,
+          code: redactedCode,
           errorType: classified.errorType,
           errorMessage: classified.errorMessage,
           stderr: rawExecution.stderr,
@@ -111,7 +114,7 @@ async function createSubmissionHandler(req, res, next, {
         data: {
           userId: req.user.id,
           languageId: languageRecord.id,
-          code,
+          code: redactedCode,
         },
       });
 
